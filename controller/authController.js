@@ -1,5 +1,6 @@
 import bcrypt from 'bcrypt';
 import validator from 'validator';
+import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 
 export const signup = async (req, res) => {
@@ -36,3 +37,42 @@ export const signup = async (req, res) => {
     res.status(500).json({ message: 'Signup failed. Please try again' });
   }
 };
+
+export const signin = async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+
+    if (typeof email !== 'string' || typeof password !== 'string') {
+      return res.status(400).json({ message: 'Email and password are required' });
+    }
+    if (!validator.isEmail(email.trim()) || validator.isEmpty(password) || !validator.isByteLength(password, { max: 72 })) {
+      return res.status(400).json({ message: 'Please enter a valid email and password' });
+    }
+
+    const user = await User.findOne({ email: email.trim().toLowerCase() }).select('+password');
+    if (!user || !user.password || !(await bcrypt.compare(password, user.password))) {
+      return res.status(401).json({ message: 'Invalid email or password' });
+    }
+
+    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, {
+      algorithm: 'HS256',
+      expiresIn: '1h',
+    });
+
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      message: 'Signin successful',
+      token,
+      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Signin failed. Please try again' });
+  }
+};
+
+export const getMe = (req, res) => {
+  const { id, name, email, role } = req.user;
+  res.set('Cache-Control', 'no-store');
+  res.json({ user: { id, name, email, role } });
+};
+

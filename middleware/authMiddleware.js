@@ -29,3 +29,13 @@ export const protect = async (req, res, next) => {
     res.status(500).json({ message: 'Unable to check your account. Please try again' });
   }
 };
+
+export const allowRoles = (...roles) => (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Please signin first' });
+  }
+  if (!roles.includes(req.user.role)) {
+    return res.status(403).json({ message: 'You do not have permission to access this route' });
+  }
+  next();
+};

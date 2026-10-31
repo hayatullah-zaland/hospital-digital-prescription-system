@@ -6,8 +6,6 @@ import User from '../models/User.js';
 export const signup = async (req, res) => {
   try {
     const { name, email, password, role = 'patient' } = req.body || {};
-    // Only the protected administrator route can choose a different role.
-    const userRole = req.user?.role === 'hospital_admin' ? role : 'patient';
 
     if (typeof name !== 'string' || typeof email !== 'string' || typeof password !== 'string') {
       return res.status(400).json({ message: 'Name, email and password are required' });
@@ -21,12 +19,12 @@ export const signup = async (req, res) => {
     if (!validator.isLength(password, { min: 12 }) || !validator.isByteLength(password, { max: 72 })) {
       return res.status(400).json({ message: 'Password must have at least 12 characters and at most 72 UTF-8 bytes' });
     }
-    if (!User.schema.path('role').enumValues.includes(userRole)) {
+    if (typeof role !== 'string' || !validator.isIn(role, User.schema.path('role').enumValues)) {
       return res.status(400).json({ message: 'Please select a valid user role' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
-    const user = await User.create({ name, email, password: hashedPassword, role: userRole });
+    const user = await User.create({ name, email, password: hashedPassword, role });
 
     res.status(201).json({
       message: 'Signup successful',

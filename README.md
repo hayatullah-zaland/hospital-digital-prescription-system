@@ -1,5 +1,8 @@
 # ساده JWT Authentication
 
+Patient registration, search, and record viewing are documented in
+[PATIENT_API.md](PATIENT_API.md), including role permissions and Postman examples.
+
 اوس authentication د **Bearer JWT** له لارې کار کوي.
 
 ```text

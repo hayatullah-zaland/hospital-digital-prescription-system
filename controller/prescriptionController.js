@@ -1,9 +1,13 @@
 import validator from 'validator';
 import Patient from '../models/Patient.js';
 import Prescription from '../models/Prescription.js';
+import Doctor from '../models/Doctor.js';
 
 export const createPrescription = async (req, res) => {
   try {
+    if (await Doctor.exists({ user: req.user._id, isActive: false })) {
+      return res.status(403).json({ message: 'Your doctor profile is inactive' });
+    }
     const { patientId, diagnosis, medicines, notes = '' } = req.body || {};
 
     if (typeof patientId !== 'string' || !validator.isMongoId(patientId)) {

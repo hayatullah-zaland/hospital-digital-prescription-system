@@ -1,0 +1,108 @@
+Project: Hospital Digital Prescription Management System
+I am a university student developing a professional monograph project using the MERN Stack.
+I want you to act as an experienced full-stack software engineer and help me design and develop a complete, modern, responsive Digital Prescription Management System for hospitals.
+1. Five Primary Project Objectives
+The following five objectives are the highest priorities of my project:
+1.	Digital Prescription Generation: Doctors must be able to create, manage, and issue structured electronic prescriptions containing patient information, prescribed medicines, dosages, frequency, duration, and medical instructions.
+2.	Automatic Drug Interaction Detection: The system must check prescribed medicines for potentially harmful drug interactions and display understandable warnings before the doctor finalizes a prescription.
+3.	Patient Medical and Prescription History: The system must securely maintain previous prescriptions, medication information, and relevant medical history so authorized doctors can review them.
+4.	Electronic Prescription Transmission: Doctors must be able to send signed prescriptions directly to selected, authorized hospital or external pharmacies. Pharmacists must be able to receive, verify, and process these prescriptions.
+5.	Medication Allergy and Sensitivity Alerts: The system must maintain documented patient allergies and sensitivities and warn doctors when recognized medication ingredients may present an allergy risk.
+Clinical safety requirement: Drug-interaction and allergy checking must be designed around a reliable, validated medication knowledge source. During academic development, synthetic test data may be used to demonstrate these features, but it must be explicitly labeled as simulated and unsuitable for actual patient care.
+2. User Roles
+Develop role-based dashboards and permissions for:
+•	Hospital Administrator
+•	Receptionist
+•	Doctor
+•	Hospital Pharmacist
+•	Approved External Pharmacist
+•	Patient
+Each user must have access only to information and operations authorized for their role and relationship to the patient or pharmacy.
+3. Required System Modules
+•	Authentication and User Management
+•	Hospital Dashboard
+•	Patient Registration and Management
+•	Doctor Management
+•	Appointment Management
+•	Medical Records and Patient History
+•	Digital Prescription Creation
+•	Drug Interaction Checking
+•	Medication Allergy Checking
+•	Electronic Prescription Transmission
+•	Pharmacy Prescription Processing
+•	Medicine Inventory Management
+•	Patient Portal
+•	Notifications
+•	Reports and Analytics
+•	Audit Logs and Settings
+4. Technology Stack
+Use the following technologies:
+Frontend
+•	React.js with Vite
+•	JavaScript
+•	Plain CSS with CSS variables
+•	React Router
+•	Axios
+•	React Context API
+•	TanStack Query
+•	Lucide React
+•	React Hook Form
+•	Zod
+•	Recharts
+•	React Hot Toast
+Backend
+•	Node.js
+•	Express.js
+•	MongoDB
+•	Mongoose
+•	JWT-based authentication with secure session handling
+•	bcrypt or Argon2id
+•	RESTful API architecture
+Development
+•	Visual Studio Code
+•	Git and GitHub
+•	Postman
+•	Automated testing tools
+Do not use DaisyUI. Use clean, professional, reusable React components and ordinary CSS.
+5. Design Requirements
+Create a professional hospital management interface with:
+•	Fully responsive layouts
+•	Modern dashboards
+•	Collapsible sidebar
+•	Navigation bar
+•	Light and dark modes
+•	Persistent theme settings
+•	Accessible forms
+•	Tables with search, filtering, and pagination
+•	Loading indicators
+•	Success and error notifications
+•	Confirmation dialogs
+Use Indigo (#4f46e5) as the primary color and Emerald (#10b981) as the secondary color.
+6. Security and Data Protection
+Implement:
+•	Secure login and logout
+•	Server-side role-based authorization
+•	Protected patient records
+•	Password hashing
+•	Input validation
+•	Audit trails
+•	Secure prescription approval
+•	Protection against unauthorized prescription changes
+•	Safe handling of personal medical information
+Signed prescriptions must not be silently modified or deleted. All corrections and cancellations must remain traceable.
+7. Development Instructions
+I want to develop this system professionally, step by step.
+Before writing code:
+1.	Analyze the project requirements.
+2.	Design the complete project architecture.
+3.	Propose the MongoDB database collections and relationships.
+4.	Design the frontend and backend folder structures.
+5.	Define the REST API endpoints.
+6.	Explain the user roles and permissions.
+7.	Prepare a practical development roadmap.
+Then implement the project in manageable phases.
+Keep the code understandable, reusable, secure, and maintainable.
+After implementing each phase, test the functionality and explain what was completed.
+Important: Explain your programming decisions and implementation steps to me in clean, simple Pashto.
+The final goal is a functional, well-documented MERN Stack university monograph project that demonstrates all five primary objectives using safe, fictional test data.
+

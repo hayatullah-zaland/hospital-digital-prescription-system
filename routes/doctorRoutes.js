@@ -7,6 +7,7 @@ import {
 } from '../controller/doctorController.js';
 import { protect, allowRoles } from '../middleware/authMiddleware.js';
 import { validateDoctorInput, validateAvailabilityInput } from '../middleware/doctorValidation.js';
+import { getDoctorSlots } from '../controller/appointmentScheduleController.js';
 
 const router = express.Router();
 
@@ -19,6 +20,7 @@ router.use(protect);
 // لومړی اجازه، بیا validation، او په پای کې controller چلېږي.
 router.post('/', allowRoles('hospital_admin'), validateDoctorInput, createDoctor);
 router.get('/', allowRoles('hospital_admin', 'receptionist', 'doctor'), getDoctors);
+router.get('/:doctorUserId/slots', allowRoles('hospital_admin', 'receptionist', 'doctor'), getDoctorSlots);
 router.get('/:doctorUserId', allowRoles('hospital_admin', 'receptionist', 'doctor'), getDoctorByUserId);
 router.patch('/:doctorUserId', allowRoles('hospital_admin', 'doctor'), validateDoctorInput, updateDoctor);
 router.patch(

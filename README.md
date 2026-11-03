@@ -17,6 +17,9 @@ Doctor prescription creation and viewing are documented in
 د ډاکټر profile، کاري وختونو او Postman بشپړ لارښود:
 [docs/DOCTOR_API.md](docs/DOCTOR_API.md).
 
+د ملاقاتونو ثبت، تش وختونه، حالت، reschedule او Postman ازموینه:
+[docs/APPOINTMENT_API.md](docs/APPOINTMENT_API.md).
+
 اوس authentication د **Bearer JWT** له لارې کار کوي.
 
 ```text
@@ -32,15 +35,19 @@ server.js → routes → middleware → controller → models
 - `models/Doctor.js` او `controller/doctorController.js`: د doctor حساب مسلکي profile، availability او فعال حالت.
 - `middleware/doctorValidation.js`: د ډاکټر د معلوماتو validation په `validator` کوي؛
   د کوډ د لوستلو ساده پښتو لارښود په [DOCTOR_API.md](docs/DOCTOR_API.md) کې دی.
+- `models/Appointment.js`، `controller/appointmentController.js` او
+  `controller/appointmentScheduleController.js`: ملاقاتونه، کاري وختونه او تاریخچه.
+- `middleware/appointmentValidation.js`: د ملاقات input validation.
 
 Logout/session revocation، audit logging، clinical safety checks، signing او
 pharmacy processing لا د پورته پلان برخه دي؛ موجودې بشپړې برخې نه دي.
 
 د backend دننه `npm run dev` وچلوئ. د لومړي مدیر لپاره `POST /api/auth/signup` ته `role: hospital_admin` ولېږئ.
 
-د Doctor Management دایمي اتومات ازموینې په `npm test` چلېږي. `mongod`
+د Doctor Management او ملاقاتونو دایمي اتومات ازموینې په `npm test` چلېږي. `mongod`
 باید په PATH کې وي، یا یې بشپړ path په `MONGOD_BINARY` کې وټاکئ. Test خپل
-جلا موقتي DB کاروي. جزئیات په [Doctor API لارښود](docs/DOCTOR_API.md) کې دي.
+جلا موقتي DB کاروي. جزئیات په [Doctor API لارښود](docs/DOCTOR_API.md) او
+[د ملاقاتونو لارښود](docs/APPOINTMENT_API.md) کې دي.
 
 | Method | API | اجازه |
 | --- | --- | --- |

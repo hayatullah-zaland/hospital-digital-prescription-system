@@ -15,7 +15,8 @@
 | Users | رولونه او د اډمین له خوا حساب جوړول | لېست، سمون، د صلاحیت ورکولو بشپړ کنټرول او pharmacy membership |
 | Patients | ثبت، لېست، لټون، کتنه او PATCH | تایید شوی login link، د درملنې اړیکې، history او allergies |
 | Prescriptions | ساده جوړول، لېست، patient filter او کتنه | Draft/check/sign، immutable revisions، cancellation او transmission |
-| Doctor Management | linked profile، لېست/search/pagination، partial update، weekly availability او فعال حالت | appointment slot generation؛ د User حساب عمومي امنیت او audit لا جلا پاتې کار دی |
+| Doctor Management | linked profile، لېست/search/pagination، partial update، weekly availability، فعال حالت او appointment slots | د User حساب عمومي امنیت او audit لا جلا پاتې کار دی |
+| Appointments | د ۳۰ دقیقو slots، staff booking، scoped لېست، check-in، doctor start/complete، cancellation/no-show او reschedule history | CareAssignment، patient self-booking، عمومي audit او notifications |
 | نور required modules | لا نه دي جوړ شوي | لاندې Roadmap ته مراجعه وکړئ |
 
 فرض: لومړۍ نسخه د یوه روغتون ده او څو داخلي/تایید شوي بهرني درملتونونه
@@ -35,7 +36,7 @@ flowchart LR
     Client[Postman / وروسته React] --> Server[server.js]
     Server --> Routes[routes]
     Routes --> Auth[middleware: authentication او authorization]
-    Auth --> Validation[middleware: د doctor input validation]
+    Auth --> Validation[middleware: د doctor او appointment input validation]
     Validation --> Controllers[controller: business rules او نور validation]
     Controllers --> Models[models: Mongoose]
     Models --> DB[(MongoDB)]
@@ -48,7 +49,7 @@ flowchart LR
 | `models/` | schemas، reference او indexونه | `Doctor.js`، `Appointment.js`، `AuditLog.js` |
 | `controller/` | `validator`، business rules، integration او HTTP ځوابونه | `doctorController.js`، `appointmentController.js`، `medicationSafety.js` |
 | `routes/` | REST لارې او role middleware | `doctorRoutes.js`، `appointmentRoutes.js` |
-| `middleware/` | JWT/session، input validation، relationship checks او errors | `authMiddleware.js`، `doctorValidation.js`؛ وروسته `careAccess.js` او `errorHandler.js` |
+| `middleware/` | JWT/session، input validation، relationship checks او errors | `authMiddleware.js`، `doctorValidation.js`، `appointmentValidation.js`؛ وروسته `careAccess.js` او `errorHandler.js` |
 | `docs/` | غوښتنې، طرحه او module لارښودونه | همدا سند او د راتلونکو برخو اسناد |
 | د Backend root | npm تنظیمات، `.env` او موجود عمومي اسناد | `package.json`، `README.md` او موجود API لارښودونه |
 
@@ -60,7 +61,7 @@ flowchart LR
 
 ## ۳. د MongoDB Collections
 
-`User`، `Patient`، `Prescription` او `Doctor` اوس موجود models دي. د هغوی
+`User`، `Patient`، `Prescription`، `Doctor` او `Appointment` اوس موجود models دي. د هغوی
 لاندې نوي fields او نور models لا پلان دي.
 
 | Model / Collection | مهم fields او اړیکې | قاعده |
@@ -70,7 +71,7 @@ flowchart LR
 | `Doctor` / doctors | user، specialization، department، registrationNumber، availability، isActive | له doctor `User` سره یو-پر-یو اړیکه |
 | `Patient` / patients | موجود demographics او createdBy؛ وروسته user اختیاري | د patient حساب لینک یوازې تر هویت تایید وروسته |
 | `CareAssignment` / careassignments | patient، doctor، grantedBy، startsAt، expiresAt، revokedAt، reason | د درملنې فعال او وخت‌محدود صلاحیت |
-| `Appointment` / appointments | patient، doctor، startAt، endAt، status، createdBy، rescheduledFrom | د حالت تاریخ او د تکراري booking مخنیوی |
+| `Appointment` / appointments | patient، doctor، startAt، endAt، status، createdBy، isBooked، history | د حالت/وخت/actor تاریخ؛ reschedule په هماغه سند کې atomic save |
 | `MedicalRecord` / medicalrecords | patient، doctor، appointment، diagnosis، observations، vitals، status، correctionOf | finalized ریکارډ د نوې correction له لارې سمېږي |
 | `PatientAllergy` / patientallergies | patient، ingredient یا substanceText، kind، reaction، verificationStatus، recordedBy | allergy/sensitivity جلا؛ self-reported معلومات confirmed نه دي |
 | `Ingredient` / ingredients | code، name، source، sourceVersion | د سرچینې code unique |
@@ -126,9 +127,10 @@ erDiagram
   `(rootPrescription, revision)` unique وي.
 - patient/date، doctor/date او pharmacy/date د تاریخ indexونه وي.
 - د transmission او dispense idempotency key په خپل operation scope کې unique وي.
-- لومړۍ نسخه fixed، aligned appointment slots لري. د فعال booking لپاره
-  `(doctor, startAt)` unique partial index ټاکل کېږي. له slot بهر وخت او
-  overlap نه منل کېږي؛ د slot policy بدلون موجود future booking نه خرابوي.
+- لومړۍ نسخه ثابت ۳۰ دقیقې appointment slots لري؛ شروع یې `:00` یا `:30` ده.
+  `(doctor, startAt)` او `(patient, startAt)` د `isBooked: true` لپاره unique
+  partial indexes دي. له slot بهر وخت او overlap نه منل کېږي. د اندازې
+  settings لا نشته؛ راتلونکی policy بدلون د موجودو bookings ارزونه غواړي.
 - Reference یوازې foreign-key تضمین نه دی؛ controller باید د هدف موجودیت،
   role، فعال حالت او اجازه هم چک کړي.
 
@@ -166,9 +168,11 @@ HttpOnly/Secure/SameSite refresh cookie د CSRF او CORS له واضح تګلا
 ډیزاین کېږي. غیرفعال حساب protected عملیات نه شي کولای.
 
 Appointment: `scheduled → checked_in → in_progress → completed`.
-`cancelled`، `no_show` او `rescheduled` پای حالتونه دي؛ actor/reason ثبتېږي.
+`cancelled` او `no_show` پای حالتونه دي؛ actor/reason ثبتېږي.
 Receptionist check-in کوي؛ doctor visit پیل/ختموي؛ patient یوازې د خپل
-مجاز booking بدلون غواړي. Reschedule پخوانی ریکارډ ساتي او نوي ته یې تړي.
+مجاز booking بدلون غواړي. په اوسنۍ staff نسخه کې reschedule هماغه سند
+بدلوي او هر پخوانی وخت په history کې ساتي. نوی سند نه جوړېږي؛ وخت او
+تاریخچه په یوه atomic save کې دي. Patient booking او CareAssignment لا پاتې دي.
 
 ### Prescription lifecycle
 
@@ -253,11 +257,17 @@ Base: `/api`. لاندې `{id}` د حقیقي ID ځای دی. Role د پورته
 | GET | `/doctors/{doctorUserId}` | admin/خپل doctor بشپړ؛ نورو staff ته active directory fields |
 | PATCH | `/doctors/{doctorUserId}` | admin؛ doctor خپل specialization/availability |
 | PATCH | `/doctors/{doctorUserId}/availability` | admin یا خپل doctor |
+| GET | `/doctors/{doctorUserId}/slots` | admin/receptionist/doctor؛ د نېټې تش وختونه |
+| POST | `/appointments` | admin/receptionist |
+| GET | `/appointments` | admin/receptionist؛ doctor خپل ملاقاتونه |
+| GET | `/appointments/{id}` | admin/receptionist یا هماغه doctor |
+| PATCH | `/appointments/{id}/status` | staff check-in/cancel/no-show؛ هماغه doctor start/complete |
+| POST | `/appointments/{id}/reschedule` | admin/receptionist؛ scheduled ملاقات او تاریخچه |
 
 موجود لېستونه pagination لري؛ patient لټون `search` او prescription filter
 `patientId` دی. د اوسني `/auth/users` قرارداد ساتو؛ نوې `/users` لارې مدیریت دی.
 
-### Users، appointment slots او appointments — پلان
+### Users، patient booking او care assignments — پلان
 
 | Method | Endpoint | موخه / لاسرسی |
 | --- | --- | --- |
@@ -269,12 +279,9 @@ Base: `/api`. لاندې `{id}` د حقیقي ID ځای دی. Role د پورته
 | PATCH | `/users/{id}` | admin مجاز profile fields |
 | PATCH | `/users/{id}/status` | admin activate/deactivate؛ reason/audit |
 | PATCH | `/users/{id}/role` | admin مجاز role change؛ reason/audit |
-| GET | `/doctors/{doctorUserId}/slots` | د booking موجود وختونه |
-| POST | `/appointments` | admin/receptionist؛ patient خپل verified ریکارډ |
-| GET | `/appointments` | staff خپل scope؛ doctor خپل ملاقاتونه |
-| GET | `/appointments/{id}` | مجاز staff یا اړوند patient |
-| PATCH | `/appointments/{id}/status` | د transition له مخې مجاز role |
-| POST | `/appointments/{id}/reschedule` | مجاز scheduler؛ تاریخ ساتل کېږي |
+| POST | `/appointments` | د موجود staff endpoint غځول: patient خپل verified ریکارډ |
+| GET | `/appointments` | د موجود endpoint غځول: patient خپل scope |
+| GET | `/appointments/{id}` | د موجود endpoint غځول: اړوند verified patient |
 | POST | `/patients/{id}/care-assignments` | admin/receptionist د تایید شوې درملنې لپاره |
 | GET | `/patients/{id}/care-assignments` | مجاز staff |
 | POST | `/patients/{id}/care-assignments/{assignmentId}/revoke` | مجاز scheduler؛ audit reason |
@@ -380,7 +387,7 @@ Export د response له لارې ورکول کېږي؛ نوی filesystem فول�
 | --- | --- | --- |
 | ۰ | همدا architecture، collections، permissions، API او roadmap | موجود او پلان جلا؛ د ټولو modules پوښښ |
 | ۱ — یوه برخه جوړه | Doctor profile، تخصص، department، availability او فعال حالت شته؛ User/session/audit بنسټ پاتې دی | profile، permissions او inactive prescribing اتومات ازمویل شوي؛ بشپړ phase لا نه دی ختم |
-| ۲ | Appointments، slots، check-in، reschedule او CareAssignment | duplicate/concurrent slot `409`؛ خپل doctor/patient scope |
+| ۲ — یوه برخه جوړه | Appointments، slots، check-in، cancel/no-show او reschedule history شته؛ CareAssignment او patient booking پاتې دي | duplicate/concurrent booking/reschedule `409` او doctor scope ازمویل شوي؛ phase لا بشپړ نه دی |
 | ۳ | Medical Records، History، allergies او verified patient account link | بل patient ته لاسرسی نشته؛ self-report confirmed نه ښودل کېږي |
 | ۴ | Medicine Catalog، ingredients او knowledge source integration | source/version/coverage مستند؛ simulated data نښه لري |
 | ۵ | Drug Interaction او Allergy Checking | synthetic fixtures او unknown/provider failure سمې پایلې ورکوي |
@@ -395,16 +402,19 @@ Export د response له لارې ورکول کېږي؛ نوی filesystem فول�
 Profile له موجود doctor حساب سره نښلي. د کاري وختونو معنا او د هر رول
 fields په `DOCTOR_API.md` کې مستند دي. غیرفعال profile نوې نسخه بندوي؛
 بې-profile پخواني doctor حسابونه خپل پخوانی flow لري، تر explicit migration
-پورې. Appointment slots لا نه دي جوړ شوي. Session/audit بنسټ هم پاتې دی؛
+پورې. Appointment slots او staff workflow اوس جوړ دي؛
+`APPOINTMENT_API.md` یې قرارداد تشریح کوي. CareAssignment او verified patient
+booking لا نه شته. Session/audit بنسټ هم پاتې دی؛
 بشپړ security pass په پای کې هم کېږي. د عام signup role انتخاب معلومه
 تشه ده؛ تر حل کېدو مخکې production-ready RBAC نه ادعا کېږي.
 
 ## ۹. ازموینې، migration او د Backend بشپړتیا
 
 موجود Postman لارښودونه `PATIENT_API.md`، `PRESCRIPTION_API.md` او
-`docs/DOCTOR_API.md` دي. Doctor integration suite په
-`controller/doctorController.test.js` کې ساتل شوې او د `npm test` له لارې
-چلېږي. خپل موقتي MongoDB کاروي؛ `mongod` یا `MONGOD_BINARY` ورته پکار دی.
+`docs/DOCTOR_API.md` او `docs/APPOINTMENT_API.md` دي. Doctor او appointment
+integration suites په `controller/doctorController.test.js` او
+`controller/appointmentController.test.js` کې ساتل شوې او د `npm test` له لارې
+چلېږي. هر suite خپل موقتي MongoDB کاروي؛ `mongod` یا `MONGOD_BINARY` ورته پکار دی.
 د patient/prescription پخواني پراخ checks موقتي وو؛ د نورو modules دایمي
 coverage لا پاتې دی. نوي test فایلونه په همدې موجودو code فولډرونو کې راځي.
 

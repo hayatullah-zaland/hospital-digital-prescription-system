@@ -190,7 +190,9 @@ PATCH http://localhost:5000/api/doctors/DOCTOR_USER_ID/availability
 په 24-hour `HH:mm` بڼه دي. تر 28 time periods پورې منل کېږي. هر period
 باید په هماغه ورځ تر شروع وروسته ختم شي؛ overnight shift نه منل کېږي.
 د یوې ورځې periods یو پر بل نه اوړي؛ پرله‌پسې `08:00–10:00` او
-`10:00–12:00` منل کېږي. د ملاقات available slots راتلونکی پړاو دی.
+`10:00–12:00` منل کېږي. د ملاقات د ۳۰ دقیقو slots لاره اوس جوړه ده:
+`GET /api/doctors/DOCTOR_USER_ID/slots?date=YYYY-MM-DD`.
+د booking، حالت او reschedule لارښود په [APPOINTMENT_API.md](APPOINTMENT_API.md) کې دی.
 
 ## ۶. فعال/غیرفعال حالت
 

@@ -201,8 +201,9 @@ Admin د عمومي PATCH له لارې `{"isActive": false}` لېږي. غیرف
 پخوانۍ نسخې او history نه حذفېږي. Doctor خپل ځان فعالولای نه شي؛ admin
 یې د `{"isActive": true}` په لېږلو بېرته فعالوي.
 
-دا د Doctor profile حالت دی، د User حساب logout یا session revocation نه
-دی. هغه جلا امنیتي پړاو لا پاتې دی. د پخوانیو doctor حسابونو لپاره چې
+دا د Doctor profile حالت دی. د اوسني login logout/session revocation اوس
+په [AUTH_API.md](AUTH_API.md) کې جوړ او مستند دي؛ د User عمومي بندول لا
+پاتې دي. د پخوانیو doctor حسابونو لپاره چې
 لا profile نه لري، د نسخې پخوانی flow ساتل شوی؛ اجباري profile migration
 اوس نه دی پلي شوی.
 

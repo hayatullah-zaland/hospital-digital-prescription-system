@@ -16,6 +16,7 @@ import Doctor, { daysOfWeek } from '../models/Doctor.js';
 import Appointment from '../models/Appointment.js';
 import doctorRoutes from '../routes/doctorRoutes.js';
 import appointmentRoutes from '../routes/appointmentRoutes.js';
+import authRoutes from '../routes/authRoutes.js';
 
 // Only this temporary database is used. The application .env is never loaded.
 const previousSecret = process.env.JWT_SECRET;
@@ -78,16 +79,19 @@ before(async () => {
 
   const app = express();
   app.use(express.json());
+  app.use('/api/auth', authRoutes);
   app.use('/api/doctors', doctorRoutes);
   app.use('/api/appointments', appointmentRoutes);
   server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   baseUrl = `http://127.0.0.1:${server.address().port}`;
 
-  const password = await bcrypt.hash('ExamplePassphrase123!', 4);
+  const password = 'ExamplePassphrase123!';
+  const passwordHash = await bcrypt.hash(password, 4);
   for (const role of [...User.schema.path('role').enumValues, 'otherDoctor', 'noProfileDoctor']) {
-    users[role] = await User.create({ name: 'Fictional ' + role, email: role + '@example.test', password, role: role.endsWith('Doctor') ? 'doctor' : role });
-    tokens[role] = jwt.sign({ id: users[role].id }, process.env.JWT_SECRET, { algorithm: 'HS256', expiresIn: '1h' });
+    users[role] = await User.create({ name: 'Fictional ' + role, email: role + '@example.test', password: passwordHash, role: role.endsWith('Doctor') ? 'doctor' : role });
+    const signedIn = await request('POST', '/api/auth/signin', null, { email: users[role].email, password }, 200);
+    tokens[role] = signedIn.token;
   }
   for (let index = 0; index < 4; index++) {
     patients.push(await Patient.create({ name: 'Fictional Patient ' + index, dateOfBirth: new Date('1995-06-15'), phone: '1234567', address: 'Private address', createdBy: users.receptionist._id }));

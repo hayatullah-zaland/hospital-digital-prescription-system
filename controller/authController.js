@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt';
 import validator from 'validator';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
+import AuthSession from '../models/AuthSession.js';
 
 export const signup = async (req, res) => {
   try {
@@ -57,10 +58,17 @@ export const signin = async (req, res) => {
       return res.status(401).json({ message: 'Invalid email or password' });
     }
 
-    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, {
+    // هر بریالی login جلا session او جلا token لري.
+    const session = new AuthSession({
+      user: user._id,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    });
+    const token = jwt.sign({ id: user.id, sid: session.id }, process.env.JWT_SECRET, {
       algorithm: 'HS256',
       expiresIn: '1h',
     });
+    // لومړی token جوړوو؛ که secret ناسم وي، تش session نه ثبتېږي.
+    await session.save();
 
     res.set('Cache-Control', 'no-store');
     res.json({
@@ -70,6 +78,27 @@ export const signin = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ message: 'Signin failed. Please try again' });
+  }
+};
+
+export const logout = async (req, res) => {
+  try {
+    const now = new Date();
+    // session د protect له لارې راځي؛ client د بل login ID نه شي ټاکلای.
+    const result = await AuthSession.updateOne({
+      _id: req.authSession._id,
+      user: req.user._id,
+      revokedAt: null,
+      expiresAt: { $gt: now },
+    }, {
+      $set: { revokedAt: now },
+    });
+    if (result.modifiedCount !== 1) {
+      return res.status(401).json({ message: 'Your session has ended. Please signin again' });
+    }
+    res.json({ message: 'Logout successful' });
+  } catch (error) {
+    res.status(500).json({ message: 'Unable to logout. Please try again' });
   }
 };
 

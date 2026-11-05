@@ -229,6 +229,7 @@ collision، concurrent booking/reschedule، status transitions، تاریخچه�
 ناکام بدلون کې د معلوماتو ساتل او stale saves چک کوي. د doctor پخوانۍ
 ازموینې هم ورسره چلېږي.
 
-CareAssignment، verified patient self-booking، عمومي session/audit بنسټ او
+د اوسني login session/logout په [AUTH_API.md](AUTH_API.md) کې جوړ او مستند دي.
+CareAssignment، verified patient self-booking، د User عمومي امنیت/audit او
 د ملاقاتونو notifications لا پاتې دي. دا لومړۍ برخه د بشپړ Backend یا د
 clinical history د لاسرسي بشپړېدو ادعا نه کوي.

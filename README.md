@@ -20,7 +20,13 @@ Doctor prescription creation and viewing are documented in
 د ملاقاتونو ثبت، تش وختونه، حالت، reschedule او Postman ازموینه:
 [docs/APPOINTMENT_API.md](docs/APPOINTMENT_API.md).
 
-اوس authentication د **Bearer JWT** له لارې کار کوي.
+د login، session او logout ساده تشریح او Postman ازموینه:
+[docs/AUTH_API.md](docs/AUTH_API.md).
+
+د خپل ملاقات طبي ریکارډ، draft، finalize او د اصلاح تاریخچه:
+[docs/MEDICAL_RECORD_API.md](docs/MEDICAL_RECORD_API.md).
+
+اوس authentication د **Bearer JWT او AuthSession** له لارې کار کوي.
 
 ```text
 server.js → routes → middleware → controller → models
@@ -28,8 +34,9 @@ server.js → routes → middleware → controller → models
 
 - `server.js`: Express او MongoDB اتصال.
 - `models/User.js`: حساب، رول او bcrypt password hash.
-- `middleware/authMiddleware.js`: JWT او د کارن اجازه چک کوي.
-- `controller/authController.js`: signup، signin او خپل حساب.
+- `models/AuthSession.js`: د هر login session، expiry او revokedAt.
+- `middleware/authMiddleware.js`: JWT، فعال session او د کارن اجازه چک کوي.
+- `controller/authController.js`: signup، signin، logout او خپل حساب.
 - `models/Patient.js` او `controller/patientController.js`: د ناروغ ثبت، لټون، کتنه او سمون.
 - `models/Prescription.js` او `controller/prescriptionController.js`: ساده نسخې جوړول او کتل.
 - `models/Doctor.js` او `controller/doctorController.js`: د doctor حساب مسلکي profile، availability او فعال حالت.
@@ -38,21 +45,29 @@ server.js → routes → middleware → controller → models
 - `models/Appointment.js`، `controller/appointmentController.js` او
   `controller/appointmentScheduleController.js`: ملاقاتونه، کاري وختونه او تاریخچه.
 - `middleware/appointmentValidation.js`: د ملاقات input validation.
+- `models/MedicalRecord.js` او `controller/medicalRecordController.js`: د خپل
+  ملاقات طبي یادښتونه، draft/finalize او linked corrections.
+- `middleware/medicalRecordValidation.js` او `medicalRecordAccess.js`: input،
+  فعال doctor profile او د لیکلو اجازه؛ د نورو ډاکټرانو ګډ history لا پاتې دی.
 
-Logout/session revocation، audit logging، clinical safety checks، signing او
-pharmacy processing لا د پورته پلان برخه دي؛ موجودې بشپړې برخې نه دي.
+د اوسني login logout او session revocation جوړ دي. Refresh-token flow،
+د User عمومي فعال حالت، audit logging، clinical safety checks، signing او
+pharmacy processing لا د پورته پلان برخه دي.
 
 د backend دننه `npm run dev` وچلوئ. د لومړي مدیر لپاره `POST /api/auth/signup` ته `role: hospital_admin` ولېږئ.
 
-د Doctor Management او ملاقاتونو دایمي اتومات ازموینې په `npm test` چلېږي. `mongod`
+د auth/session، Doctor، ملاقاتونو او Medical Records دایمي اتومات ازموینې په `npm test` چلېږي. `mongod`
 باید په PATH کې وي، یا یې بشپړ path په `MONGOD_BINARY` کې وټاکئ. Test خپل
 جلا موقتي DB کاروي. جزئیات په [Doctor API لارښود](docs/DOCTOR_API.md) او
 [د ملاقاتونو لارښود](docs/APPOINTMENT_API.md) کې دي.
+د auth ازموینې او تازه token اخیستل په [AUTH_API.md](docs/AUTH_API.md) کې دي.
+د طبي ریکارډ ازموینه په [MEDICAL_RECORD_API.md](docs/MEDICAL_RECORD_API.md) کې ده.
 
 | Method | API | اجازه |
 | --- | --- | --- |
 | POST | /api/auth/signup | عام ثبت، رول ټاکل کېدای شي |
 | POST | /api/auth/signin | ننوتل |
+| POST | /api/auth/logout | د اوسني token session بندول |
 | GET | /api/auth/me | JWT غواړي |
 | POST | /api/auth/users | یوازې hospital_admin |
 
@@ -72,7 +87,12 @@ pharmacy processing لا د پورته پلان برخه دي؛ موجودې ب�
 Authorization: Bearer YOUR_TOKEN
 ```
 
-موجود JWT یو ساعت اعتبار لري. Logout، session revocation او refresh-token flow لا نه دي جوړ شوي؛ د Backend د امنیتي پړاو برخه دي.
+موجود JWT او session نږدې یو ساعت اعتبار لري. Logout هماغه session بندوي؛
+له هغه token سره راتلونکې protected غوښتنې `401` ورکوي. د حساب نور loginونه
+فعال پاتې کېږي. Refresh-token flow لا نه دی جوړ شوی.
+
+له پخوانۍ نسخې tokenونه session ID نه لري؛ د خپل موجود حساب په وسیله بیا
+signin وکړئ. د پخوانیو کاروونکو یا نورو DB معلوماتو پاکولو ته اړتیا نشته.
 
 مدیر د /api/auth/users له لارې name، email، password او role لېږي. رولونه hospital_admin، receptionist، doctor، hospital_pharmacist، external_pharmacist او patient دي. عام ثبت role مني؛ که role ونه لېږل شي، patient ټاکل کېږي.
 

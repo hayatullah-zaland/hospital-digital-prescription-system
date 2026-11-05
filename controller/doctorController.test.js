@@ -92,8 +92,9 @@ before(async () => {
 beforeEach(async () => {
   await Promise.all([Doctor.deleteMany({}), Prescription.deleteMany({})]);
   await Doctor.create([
-    { user: users.doctor._id, specialization: 'General Medicine', department: 'Outpatient', registrationNumber: 'DEMO-A001', availability, createdBy: users.hospital_admin._id },
-    { user: users.otherDoctor._id, specialization: 'Demo Specialty', department: 'Demo Department', registrationNumber: 'DEMO-B001', availability: [], createdBy: users.hospital_admin._id },
+    // Explicit dates keep the pagination fixture ordered even when inserts run concurrently.
+    { user: users.doctor._id, specialization: 'General Medicine', department: 'Outpatient', registrationNumber: 'DEMO-A001', availability, createdBy: users.hospital_admin._id, createdAt: new Date('2026-01-01T00:00:00Z') },
+    { user: users.otherDoctor._id, specialization: 'Demo Specialty', department: 'Demo Department', registrationNumber: 'DEMO-B001', availability: [], createdBy: users.hospital_admin._id, createdAt: new Date('2026-01-02T00:00:00Z') },
   ]);
 });
 

@@ -11,12 +11,13 @@
 
 | برخه | موجود | پاتې کار |
 | --- | --- | --- |
-| Authentication | Signup، signin، bcrypt، Bearer JWT او role middleware | Logout، session revocation، فعال/غیرفعال حساب او audit |
+| Authentication | Signup، signin، bcrypt، Bearer JWT، AuthSession، خپل logout او role middleware | Refresh token، sessions لېست/مدیریت، فعال/غیرفعال User او audit |
 | Users | رولونه او د اډمین له خوا حساب جوړول | لېست، سمون، د صلاحیت ورکولو بشپړ کنټرول او pharmacy membership |
 | Patients | ثبت، لېست، لټون، کتنه او PATCH | تایید شوی login link، د درملنې اړیکې، history او allergies |
 | Prescriptions | ساده جوړول، لېست، patient filter او کتنه | Draft/check/sign، immutable revisions، cancellation او transmission |
 | Doctor Management | linked profile، لېست/search/pagination، partial update، weekly availability، فعال حالت او appointment slots | د User حساب عمومي امنیت او audit لا جلا پاتې کار دی |
 | Appointments | د ۳۰ دقیقو slots، staff booking، scoped لېست، check-in، doctor start/complete، cancellation/no-show او reschedule history | CareAssignment، patient self-booking، عمومي audit او notifications |
+| Medical Records | د خپل ملاقات draft، scoped لېست، سمون، finalize او linked correction history | د نورو clinicians مجاز history، allergies، verified patient link او admin clinical audit |
 | نور required modules | لا نه دي جوړ شوي | لاندې Roadmap ته مراجعه وکړئ |
 
 فرض: لومړۍ نسخه د یوه روغتون ده او څو داخلي/تایید شوي بهرني درملتونونه
@@ -29,6 +30,11 @@ Signup د کاروونکي د مخکېني تصمیم له مخې هر معتب�
 باید د امنیتي پړاو لپاره روښانه جلا شي. تشه ثبت ده؛ د کاروونکي د څرګندې
 لارښوونې خلاف به signup په پټه نه بدلېږي.
 
+د ۲۰۲۶-۱۱-۰۵ د کاروونکي د پرېکړې له مخې CareAssignment فعلاً ځنډېدلی دی.
+Medical Records یوازې د هماغه ډاکټر له پیل شوي یا بشپړ ملاقات سره نښلي؛
+ډاکټر خپل یادښتونه ګوري او بدلوي. د بل clinician ګډ history او د اډمین
+clinical کتنه تر خپلو relationship/audit قواعدو پورې لا پلان دي.
+
 ## ۲. معماري او موجود فولډرونه
 
 ```mermaid
@@ -36,7 +42,7 @@ flowchart LR
     Client[Postman / وروسته React] --> Server[server.js]
     Server --> Routes[routes]
     Routes --> Auth[middleware: authentication او authorization]
-    Auth --> Validation[middleware: د doctor او appointment input validation]
+    Auth --> Validation[middleware: input validation او د لیکلو اجازه]
     Validation --> Controllers[controller: business rules او نور validation]
     Controllers --> Models[models: Mongoose]
     Models --> DB[(MongoDB)]
@@ -61,18 +67,18 @@ flowchart LR
 
 ## ۳. د MongoDB Collections
 
-`User`، `Patient`، `Prescription`، `Doctor` او `Appointment` اوس موجود models دي. د هغوی
+`User`، `AuthSession`، `Patient`، `Prescription`، `Doctor`، `Appointment` او `MedicalRecord` اوس موجود models دي. د هغوی
 لاندې نوي fields او نور models لا پلان دي.
 
 | Model / Collection | مهم fields او اړیکې | قاعده |
 | --- | --- | --- |
 | `User` / users | name، email، password hash، role؛ وروسته isActive | unique email؛ clinical reference لرونکی حساب غیرفعالېږي |
-| `AuthSession` / authsessions | user، refreshTokenHash، expiresAt، revokedAt | expiry په هره اړونده غوښتنه کې هم چک کېږي |
+| `AuthSession` / authsessions | موجود user، expiresAt، revokedAt او timestamps؛ وروسته refreshTokenHash | expiry/revoke په هره protected غوښتنه کې چک کېږي؛ خام token نه ساتي |
 | `Doctor` / doctors | user، specialization، department، registrationNumber، availability، isActive | له doctor `User` سره یو-پر-یو اړیکه |
 | `Patient` / patients | موجود demographics او createdBy؛ وروسته user اختیاري | د patient حساب لینک یوازې تر هویت تایید وروسته |
 | `CareAssignment` / careassignments | patient، doctor، grantedBy، startsAt، expiresAt، revokedAt، reason | د درملنې فعال او وخت‌محدود صلاحیت |
 | `Appointment` / appointments | patient، doctor، startAt، endAt، status، createdBy، isBooked، history | د حالت/وخت/actor تاریخ؛ reschedule په هماغه سند کې atomic save |
-| `MedicalRecord` / medicalrecords | patient، doctor، appointment، diagnosis، observations، vitals، status، correctionOf | finalized ریکارډ د نوې correction له لارې سمېږي |
+| `MedicalRecord` / medicalrecords | patient، doctor، appointment، symptoms، diagnosis، observations، vitals، status، finalizedAt/By، correctionOf/Reason | خپل draft سمېږي؛ finalized د linked نوې draft او جلا تایید له لارې اصلاح کېږي |
 | `PatientAllergy` / patientallergies | patient، ingredient یا substanceText، kind، reaction، verificationStatus، recordedBy | allergy/sensitivity جلا؛ self-reported معلومات confirmed نه دي |
 | `Ingredient` / ingredients | code، name، source، sourceVersion | د سرچینې code unique |
 | `Medicine` / medicines | code، name، strength، form، ingredients، source، sourceVersion | د prescription او inventory مشترک catalog |
@@ -161,11 +167,16 @@ CareAssignment admin/receptionist د تایید شوي booking یا درملنې
 
 ### Sessions او ملاقاتونه
 
-موجود Bearer JWT د Postman لپاره ساتو. په secure-session پړاو کې access
-token له AuthSession سره نښلوو؛ logout session revoke کوي. Refresh token
-hash په DB کې ساتو او rotation/expiry چک کوو. د راتلونکي browser لپاره
+موجود Bearer JWT اوس د `sid` په وسیله له AuthSession سره نښلي. هر signin
+جلا session لري؛ `protect` signature، expiry، د session مالکیت او revokedAt
+چک کوي. Logout یوازې اوسنی session بندوي، نور loginونه فعال پاتې کېږي.
+پخواني بې-session tokenونه تازه signin غواړي؛ موجود DB ریکارډونه نه ړنګېږي.
+دا لومړۍ برخه په `AUTH_API.md` کې مستنده ده.
+
+Refresh token hash/rotation، د sessions لېست، د بل خپل session revoke او
+د User عمومي فعال حالت لا پلان دي. د راتلونکي browser لپاره
 HttpOnly/Secure/SameSite refresh cookie د CSRF او CORS له واضح تګلارې سره
-ډیزاین کېږي. غیرفعال حساب protected عملیات نه شي کولای.
+ډیزاین کېږي. د User غیرفعال حالت عمومي تطبیق لا نه دی جوړ شوی.
 
 Appointment: `scheduled → checked_in → in_progress → completed`.
 `cancelled` او `no_show` پای حالتونه دي؛ actor/reason ثبتېږي.
@@ -242,6 +253,7 @@ Base: `/api`. لاندې `{id}` د حقیقي ID ځای دی. Role د پورته
 | --- | --- | --- |
 | POST | `/auth/signup` | عام؛ ټاکل شوی معتبر role مني |
 | POST | `/auth/signin` | عام |
+| POST | `/auth/logout` | هر ننوتلی حساب؛ یوازې د اوسني token session |
 | GET | `/auth/me` | ننوتلی حساب |
 | GET | `/auth/admin` | hospital_admin permission check |
 | POST | `/auth/users` | hospital_admin |
@@ -263,6 +275,12 @@ Base: `/api`. لاندې `{id}` د حقیقي ID ځای دی. Role د پورته
 | GET | `/appointments/{id}` | admin/receptionist یا هماغه doctor |
 | PATCH | `/appointments/{id}/status` | staff check-in/cancel/no-show؛ هماغه doctor start/complete |
 | POST | `/appointments/{id}/reschedule` | admin/receptionist؛ scheduled ملاقات او تاریخچه |
+| POST | `/medical-records` | فعال doctor؛ خپل in_progress/completed ملاقات |
+| GET | `/medical-records` | doctor؛ یوازې خپل یادښتونه او filters |
+| GET | `/medical-records/{id}` | یوازې لیکونکی doctor |
+| PATCH | `/medical-records/{id}` | فعال لیکونکی؛ یوازې draft |
+| POST | `/medical-records/{id}/finalize` | فعال لیکونکی؛ وروستی تایید او actor/time |
+| POST | `/medical-records/{id}/corrections` | فعال لیکونکی؛ finalized ته نوې linked draft او reason |
 
 موجود لېستونه pagination لري؛ patient لټون `search` او prescription filter
 `patientId` دی. د اوسني `/auth/users` قرارداد ساتو؛ نوې `/users` لارې مدیریت دی.
@@ -271,7 +289,6 @@ Base: `/api`. لاندې `{id}` د حقیقي ID ځای دی. Role د پورته
 
 | Method | Endpoint | موخه / لاسرسی |
 | --- | --- | --- |
-| POST | `/auth/logout` | خپل session revoke |
 | POST | `/auth/refresh` | معتبرې session ته token rotation |
 | GET | `/auth/sessions` | خپل sessions |
 | POST | `/auth/sessions/{id}/revoke` | خپل ټاکلی session revoke |
@@ -290,12 +307,8 @@ Base: `/api`. لاندې `{id}` د حقیقي ID ځای دی. Role د پورته
 
 | Method | Endpoint | موخه / لاسرسی |
 | --- | --- | --- |
-| POST | `/medical-records` | treating doctor د visit ریکارډ |
 | GET | `/patients/{id}/history` | treating doctor؛ admin د مجاز audit مقصد لپاره |
-| GET | `/medical-records/{id}` | مجاز doctor/admin؛ وروسته patient خپل finalized ریکارډ |
-| PATCH | `/medical-records/{id}` | د خپل draft سمون |
-| POST | `/medical-records/{id}/finalize` | لیکونکی doctor |
-| POST | `/medical-records/{id}/corrections` | treating doctor؛ linked record او reason |
+| GET | `/medical-records/{id}` | د موجود endpoint راتلونکی غځول: د بل مجاز clinician/admin audit او verified patient scope |
 | GET | `/patients/{id}/allergies` | treating doctor یا linked patient |
 | POST | `/patients/{id}/allergies` | treating doctor؛ source/verification |
 | PATCH | `/patients/{id}/allergies/{allergyId}` | treating doctor؛ تاریخ او audit |
@@ -386,9 +399,9 @@ Export د response له لارې ورکول کېږي؛ نوی filesystem فول�
 | پړاو | کار | د منلو معیار |
 | --- | --- | --- |
 | ۰ | همدا architecture، collections، permissions، API او roadmap | موجود او پلان جلا؛ د ټولو modules پوښښ |
-| ۱ — یوه برخه جوړه | Doctor profile، تخصص، department، availability او فعال حالت شته؛ User/session/audit بنسټ پاتې دی | profile، permissions او inactive prescribing اتومات ازمویل شوي؛ بشپړ phase لا نه دی ختم |
+| ۱ — یوه برخه جوړه | Doctor profile او خپل login session/logout شته؛ refresh، User مدیریت او audit پاتې دي | profile، permissions، inactive prescribing، session expiry او logout ازمویل شوي؛ phase لا نه دی بشپړ |
 | ۲ — یوه برخه جوړه | Appointments، slots، check-in، cancel/no-show او reschedule history شته؛ CareAssignment او patient booking پاتې دي | duplicate/concurrent booking/reschedule `409` او doctor scope ازمویل شوي؛ phase لا بشپړ نه دی |
-| ۳ | Medical Records، History، allergies او verified patient account link | بل patient ته لاسرسی نشته؛ self-report confirmed نه ښودل کېږي |
+| ۳ — یوه برخه جوړه | خپل Medical Records، draft/finalize او corrections شته؛ ګډ history، allergies او verified patient link پاتې دي | ownership، visit status، finalized snapshot او concurrent writes ازمویل شوي |
 | ۴ | Medicine Catalog، ingredients او knowledge source integration | source/version/coverage مستند؛ simulated data نښه لري |
 | ۵ | Drug Interaction او Allergy Checking | synthetic fixtures او unknown/provider failure سمې پایلې ورکوي |
 | ۶ | Prescription draft/check/sign، correction او cancellation | signed content immutable؛ stale check نه sign کېږي؛ trace/audit ساتل کېږي |
@@ -404,16 +417,25 @@ fields په `DOCTOR_API.md` کې مستند دي. غیرفعال profile نوې 
 بې-profile پخواني doctor حسابونه خپل پخوانی flow لري، تر explicit migration
 پورې. Appointment slots او staff workflow اوس جوړ دي؛
 `APPOINTMENT_API.md` یې قرارداد تشریح کوي. CareAssignment او verified patient
-booking لا نه شته. Session/audit بنسټ هم پاتې دی؛
+booking لا نه شته. د خپل login session/logout بنسټ اوس شته؛ refresh،
+د User عمومي امنیت او audit پاتې دي؛
 بشپړ security pass په پای کې هم کېږي. د عام signup role انتخاب معلومه
 تشه ده؛ تر حل کېدو مخکې production-ready RBAC نه ادعا کېږي.
+
+د Medical Records لومړۍ برخه په `MEDICAL_RECORD_API.md` کې مستنده ده.
+CareAssignment د کاروونکي په غوښتنه فعلاً ځنډېدلی دی. د خپل ملاقات اړیکه
+یوازې د هماغه doctor خپل یادښت ته اجازه ورکوي. د نورو ډاکټرانو تاریخ،
+د اډمین audited clinical لاسرسی او patient portal لا نه دي پرانیستل شوي.
+هر ملاقات یو اصلي ریکارډ لري؛ هر finalized ریکارډ یوه مستقیمه correction
+لرلای شي. د اصلاح لړۍ پخواني finalized ریکارډونه او تاییدونه ساتي.
 
 ## ۹. ازموینې، migration او د Backend بشپړتیا
 
 موجود Postman لارښودونه `PATIENT_API.md`، `PRESCRIPTION_API.md` او
-`docs/DOCTOR_API.md` او `docs/APPOINTMENT_API.md` دي. Doctor او appointment
-integration suites په `controller/doctorController.test.js` او
-`controller/appointmentController.test.js` کې ساتل شوې او د `npm test` له لارې
+`docs/DOCTOR_API.md`، `docs/APPOINTMENT_API.md`، `docs/AUTH_API.md` او
+`docs/MEDICAL_RECORD_API.md` دي. Auth/session، Doctor، appointment او Medical Records suites په
+`controller/authController.test.js`، `controller/doctorController.test.js` او
+`controller/appointmentController.test.js` او `controller/medicalRecordController.test.js` کې ساتل شوې او د `npm test` له لارې
 چلېږي. هر suite خپل موقتي MongoDB کاروي؛ `mongod` یا `MONGOD_BINARY` ورته پکار دی.
 د patient/prescription پخواني پراخ checks موقتي وو؛ د نورو modules دایمي
 coverage لا پاتې دی. نوي test فایلونه په همدې موجودو code فولډرونو کې راځي.
@@ -440,7 +462,8 @@ Migration کې explicit defaults او د unique index تر جوړولو مخکې
 
 - [ ] ټول ۱۶ required modules مجاز Backend endpoints لري.
 - [ ] پنځه اصلي موخې په خیالي معلوماتو end-to-end ښودل کېږي.
-- [ ] Logout/session، inactive accounts او privilege provisioning حل دي.
+- [x] د اوسني login session، expiry او logout جوړ او ازمویل شوي.
+- [ ] Refresh/session مدیریت، inactive accounts او privilege provisioning بشپړ دي.
 - [ ] Patient/doctor/pharmacy scopes، audit او signed immutability ازمویل شوي.
 - [ ] Knowledge source، د استعمال حق، coverage او simulation محدودیت مستند دي.
 - [ ] Transaction، concurrency او idempotency په مناسب DB چاپېریال کې تېر دي.

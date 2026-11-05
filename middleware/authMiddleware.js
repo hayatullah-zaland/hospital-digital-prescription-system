@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import validator from 'validator';
 import User from '../models/User.js';
+import AuthSession from '../models/AuthSession.js';
 
 export const protect = async (req, res, next) => {
   // Expected header: Authorization: Bearer your-token
@@ -14,6 +15,20 @@ export const protect = async (req, res, next) => {
     if (!decoded || typeof decoded.id !== 'string' || !validator.isMongoId(decoded.id) || typeof decoded.exp !== 'number') {
       return res.status(401).json({ message: 'Invalid token. Please signin again' });
     }
+    if (typeof decoded.sid !== 'string' || !validator.isMongoId(decoded.sid)) {
+      return res.status(401).json({ message: 'Please signin again to start a new session' });
+    }
+
+    // معتبر token هم باید خپل فعال او نه ختم شوی session ولري.
+    const session = await AuthSession.findOne({
+      _id: decoded.sid,
+      user: decoded.id,
+      revokedAt: null,
+      expiresAt: { $gt: new Date() },
+    });
+    if (!session) {
+      return res.status(401).json({ message: 'Your session has ended. Please signin again' });
+    }
 
     const user = await User.findById(decoded.id);
     if (!user) {
@@ -21,6 +36,7 @@ export const protect = async (req, res, next) => {
     }
 
     req.user = user;
+    req.authSession = session;
     next();
   } catch (error) {
     if (['JsonWebTokenError', 'TokenExpiredError', 'NotBeforeError'].includes(error.name)) {

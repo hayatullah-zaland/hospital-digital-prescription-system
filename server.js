@@ -7,12 +7,14 @@ import prescriptionRoutes from './routes/prescriptionRoutes.js';
 import doctorRoutes from './routes/doctorRoutes.js';
 import appointmentRoutes from './routes/appointmentRoutes.js';
 import medicalRecordRoutes from './routes/medicalRecordRoutes.js';
+import { handleJsonErrors } from './middleware/jsonErrorHandler.js';
 
 dotenv.config();
 
 const app = express();
 
 app.use(express.json());
+app.use(handleJsonErrors);
 app.use('/api/auth', authRoutes);
 app.use('/api/patients', patientRoutes);
 app.use('/api/prescriptions', prescriptionRoutes);

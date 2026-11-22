@@ -165,7 +165,7 @@ npm test
 ```
 
 د auth/session suite **۳۳** ازموینې لري. له **۵۳ doctor**، **۲۶ appointment**
-او **۲۷ Medical Records** سره ټولې **۱۳۹** بریالۍ شوې دي. د ملاقاتونو fixtures هم
+او **۲۷ Medical Records** او **۳۶ allergies** سره ټولې **۱۷۵** بریالۍ شوې دي. د ملاقاتونو fixtures هم
 د اصلي signin له لارې session لرونکي tokenونه اخلي.
 
 ازموینې د ټولو رولونو logout، جلا loginونه، revoke/expiry، پخواني tokenونه،

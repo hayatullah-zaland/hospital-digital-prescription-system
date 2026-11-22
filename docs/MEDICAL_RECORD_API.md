@@ -200,5 +200,7 @@ draft ID لري؛ `correctionOf` پخواني finalized ریکارډ ته نښل
 د application `.env` نه لولي او عادي DB نه پاکوي.
 
 CareAssignment فعلاً ځنډېدلی دی. د نورو ډاکټرانو مجاز history، د ناروغ
-بشپړ مشترک history endpoint، allergies، verified patient link/portal او
+بشپړ مشترک medical history endpoint، verified patient link/portal او
 د اډمین audited clinical access لا پاتې دي. دا د Medical Records لومړۍ برخه ده.
+د ۲۰۲۶-۱۱-۲۲ د حساسیتونو ثبت/review په [PATIENT_ALLERGY_API.md](PATIENT_ALLERGY_API.md)
+کې جوړ او مستند دی؛ allergies خپل روان ملاقات غواړي، completed یې اجازه نه ورکوي.

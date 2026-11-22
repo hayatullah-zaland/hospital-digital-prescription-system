@@ -26,6 +26,9 @@ Doctor prescription creation and viewing are documented in
 د خپل ملاقات طبي ریکارډ، draft، finalize او د اصلاح تاریخچه:
 [docs/MEDICAL_RECORD_API.md](docs/MEDICAL_RECORD_API.md).
 
+د ناروغ حساسیتونه، د روانې معاینې اجازه، review او د بدلونونو تاریخچه:
+[docs/PATIENT_ALLERGY_API.md](docs/PATIENT_ALLERGY_API.md).
+
 اوس authentication د **Bearer JWT او AuthSession** له لارې کار کوي.
 
 ```text
@@ -49,6 +52,10 @@ server.js → routes → middleware → controller → models
   ملاقات طبي یادښتونه، draft/finalize او linked corrections.
 - `middleware/medicalRecordValidation.js` او `medicalRecordAccess.js`: input،
   فعال doctor profile او د لیکلو اجازه؛ د نورو ډاکټرانو ګډ history لا پاتې دی.
+- `models/PatientAllergy.js` او `controller/patientAllergyController.js`: حساسیتونه،
+  review، version او تاریخچه؛ د خپل روان ملاقات doctor یې اداره کوي.
+- `middleware/patientAllergyAccess.js` او `patientAllergyValidation.js`: اجازه او input.
+- `middleware/jsonErrorHandler.js`: ناسم JSON ته ساده JSON ځواب.
 
 د اوسني login logout او session revocation جوړ دي. Refresh-token flow،
 د User عمومي فعال حالت، audit logging، clinical safety checks، signing او
@@ -56,12 +63,13 @@ pharmacy processing لا د پورته پلان برخه دي.
 
 د backend دننه `npm run dev` وچلوئ. د لومړي مدیر لپاره `POST /api/auth/signup` ته `role: hospital_admin` ولېږئ.
 
-د auth/session، Doctor، ملاقاتونو او Medical Records دایمي اتومات ازموینې په `npm test` چلېږي. `mongod`
+د auth/session، Doctor، ملاقاتونو، Medical Records او allergies دایمي اتومات ازموینې په `npm test` چلېږي. `mongod`
 باید په PATH کې وي، یا یې بشپړ path په `MONGOD_BINARY` کې وټاکئ. Test خپل
 جلا موقتي DB کاروي. جزئیات په [Doctor API لارښود](docs/DOCTOR_API.md) او
 [د ملاقاتونو لارښود](docs/APPOINTMENT_API.md) کې دي.
 د auth ازموینې او تازه token اخیستل په [AUTH_API.md](docs/AUTH_API.md) کې دي.
 د طبي ریکارډ ازموینه په [MEDICAL_RECORD_API.md](docs/MEDICAL_RECORD_API.md) کې ده.
+د حساسیتونو ازموینه په [PATIENT_ALLERGY_API.md](docs/PATIENT_ALLERGY_API.md) کې ده.
 
 | Method | API | اجازه |
 | --- | --- | --- |

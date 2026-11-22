@@ -35,6 +35,15 @@ order. Keep its descriptions of existing and planned functionality accurate.
   project design before expanding into additional modules.
 - Preserve existing work and test the functionality after each phase. Report
   what was completed, what was tested, and any remaining limitations accurately.
+- Use focused tests for the changed module, adding affected modules when needed.
+  Run the full suite for changes with broad effects, such as shared authentication
+  or middleware, and at major milestones. Documentation/comment-only changes
+  normally need no application tests. Keep output to summaries and failures;
+  do not rerun successful tests without a new change or unresolved concern.
+- Reuse relevant existing code before adding new logic. Avoid duplicate code and
+  unnecessary rewrites. Use a small, clearly named function when it removes real
+  repetition; keep code short and capable while preserving easy intermediate-level
+  readability. Avoid clever expressions or abstractions added only to shorten code.
 - After completing and testing each requested feature or code change, automatically
   create a detailed Git commit and push it to the configured GitHub branch. The
   user granted standing authorization on 2026-11-22; do not ask again for each part.

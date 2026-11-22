@@ -35,6 +35,14 @@ order. Keep its descriptions of existing and planned functionality accurate.
   project design before expanding into additional modules.
 - Preserve existing work and test the functionality after each phase. Report
   what was completed, what was tested, and any remaining limitations accurately.
+- After completing and testing each requested feature or code change, automatically
+  create a detailed Git commit and push it to the configured GitHub branch. The
+  user granted standing authorization on 2026-11-22; do not ask again for each part.
+  Use a clear commit title and a body explaining what changed, why, test results,
+  and relevant remaining limitations. Stage only files belonging to the task;
+  preserve unrelated local edits and exclude secrets. Verify the push and report
+  the commit ID. If the push is blocked, report the reason without claiming success
+  or forcing an overwrite of remote work.
 - Use `validator` for backend input validation, as requested in this conversation.
   The specified frontend form stack is React Hook Form with Zod.
 

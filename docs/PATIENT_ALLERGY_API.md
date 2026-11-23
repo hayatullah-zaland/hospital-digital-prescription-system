@@ -3,8 +3,8 @@
 نېټه: ۲۰۲۶-۱۱-۲۲
 
 د Patient Allergies لومړۍ برخه جوړه ده: ثبت، کتنه، review او د سمون
-تاریخچه. اتومات allergy checking د Medicine Catalog، ingredient mapping
-او معتبرې معلوماتي سرچینې له جوړېدو وروسته راځي.
+تاریخچه. د Medicine Catalog ازمایښتي بنسټ اوس په `MEDICINE_API.md` کې دی؛
+اتومات allergy checking لا ingredient mapping او معتبرې معلوماتي سرچینې ته اړتیا لري.
 
 ## ۱. اړیکې او د کوډ مسیر
 

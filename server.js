@@ -7,6 +7,8 @@ import prescriptionRoutes from './routes/prescriptionRoutes.js';
 import doctorRoutes from './routes/doctorRoutes.js';
 import appointmentRoutes from './routes/appointmentRoutes.js';
 import medicalRecordRoutes from './routes/medicalRecordRoutes.js';
+import ingredientRoutes from './routes/ingredientRoutes.js';
+import medicineRoutes from './routes/medicineRoutes.js';
 import { handleJsonErrors } from './middleware/jsonErrorHandler.js';
 
 dotenv.config();
@@ -21,6 +23,8 @@ app.use('/api/prescriptions', prescriptionRoutes);
 app.use('/api/doctors', doctorRoutes);
 app.use('/api/appointments', appointmentRoutes);
 app.use('/api/medical-records', medicalRecordRoutes);
+app.use('/api/ingredients', ingredientRoutes);
+app.use('/api/medicines', medicineRoutes);
 
 app.get('/', (req, res) => res.send('Server is running'));
 

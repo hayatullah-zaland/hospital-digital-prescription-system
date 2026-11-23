@@ -19,6 +19,7 @@
 | Appointments | د ۳۰ دقیقو slots، staff booking، scoped لېست، check-in، doctor start/complete، cancellation/no-show او reschedule history | CareAssignment، patient self-booking، عمومي audit او notifications |
 | Medical Records | د خپل ملاقات draft، scoped لېست، سمون، finalize او linked correction history | د نورو clinicians مجاز history، verified patient link او admin clinical audit |
 | Patient Allergies | د خپل روان ملاقات له لارې ثبت، کتنه، review، سمون او embedded history | ingredient mapping، اتومات allergy checking، portal او عمومي audit |
+| Medicine Catalog | simulated Ingredient او Medicine، ثبت/کتنه، search/filter/pagination، فعال حالت او version لرونکی سمون | معتبر knowledge provider، allergy/Rx mapping، safety checking او عمومي audit |
 | نور required modules | لا نه دي جوړ شوي | لاندې Roadmap ته مراجعه وکړئ |
 
 فرض: لومړۍ نسخه د یوه روغتون ده او څو داخلي/تایید شوي بهرني درملتونونه
@@ -73,7 +74,7 @@ flowchart LR
 
 ## ۳. د MongoDB Collections
 
-`User`، `AuthSession`، `Patient`، `Prescription`، `Doctor`، `Appointment`، `MedicalRecord` او `PatientAllergy` اوس موجود models دي. د هغوی
+`User`، `AuthSession`، `Patient`، `Prescription`، `Doctor`، `Appointment`، `MedicalRecord`، `PatientAllergy`، `Ingredient` او `Medicine` اوس موجود models دي. د هغوی
 لاندې نوي fields او نور models لا پلان دي.
 
 | Model / Collection | مهم fields او اړیکې | قاعده |
@@ -86,8 +87,8 @@ flowchart LR
 | `Appointment` / appointments | patient، doctor، startAt، endAt، status، createdBy، isBooked، history | د حالت/وخت/actor تاریخ؛ reschedule په هماغه سند کې atomic save |
 | `MedicalRecord` / medicalrecords | patient، doctor، appointment، symptoms، diagnosis، observations، vitals، status، finalizedAt/By، correctionOf/Reason | خپل draft سمېږي؛ finalized د linked نوې draft او جلا تایید له لارې اصلاح کېږي |
 | `PatientAllergy` / patientallergies | موجود patient، substance، kind، reaction، source، verificationStatus، recordedBy/updatedBy، reviewedAt/By، version او history؛ ingredient لا پلان دی | نوی راپور unconfirmed؛ review/سمون reason غواړي؛ snapshot/actor/visit خوندي دي |
-| `Ingredient` / ingredients | code، name، source، sourceVersion | د سرچینې code unique |
-| `Medicine` / medicines | code، name، strength، form، ingredients، source، sourceVersion | د prescription او inventory مشترک catalog |
+| `Ingredient` / ingredients | موجود ثابت code/name، mode، source، sourceVersion، notice او createdBy | uppercase code unique؛ یوازې simulated ثبت/کتنه، PATCH/DELETE نه لري |
+| `Medicine` / medicines | موجود code، name، strength، form، ingredients، notes، isActive، mode، source، sourceVersion، notice، createdBy/updatedBy او version | ثابت unique code؛ optimistic concurrency؛ له prescription/inventory سره نښلول لا پلان دي |
 | `KnowledgeRule` / knowledgerules | kind، ingredient IDs، providerRuleId، severity، evidence، sourceVersion، mode | معتبره سرچینه یا څرګند simulated rule |
 | `SafetyCheck` / safetychecks | prescription، revision، contentHash، allergyVersion، sourceVersion، findings، coverage، mode | د یوې مشخصې محتوا check؛ بدلون یې زړوي |
 | `Prescription` / prescriptions | patient، doctor، diagnosis، medicines؛ وروسته status، revision، rootPrescription، correctionOf، snapshots، signature | signed clinical content immutable |
@@ -173,6 +174,11 @@ CareAssignment admin/receptionist د تایید شوي booking یا درملنې
 په هر request کې بیا چک کېږي. د بل doctor پخوانی allergy ریکارډ د همدې
 روانې درملنې په اړیکه کې کتل/سمېدلای شي. Client patient/actor/history نه ټاکي.
 
+موجود Medicine Catalog د patient معلومات نه لري. hospital_admin او
+hospital_pharmacist یې اداره کوي؛ doctor اجزا او یوازې فعالې دواوې لولي.
+receptionist، patient او external_pharmacist منع دي. دا رول اجازه د pharmacy
+نسخو، stock یا patient ریکارډونو ته لاسرسی نه ورکوي.
+
 ## ۵. مهم business workflows
 
 ### Sessions او ملاقاتونه
@@ -222,6 +228,17 @@ stateDiagram-v2
   legacy unsigned ریکارډونه دي؛ catalog mapping او تازه check غواړي.
 
 ### Interaction او allergy checks
+
+د ۲۰۲۶-۱۱-۲۳ Medicine Catalog لومړۍ برخه جوړه ده. Ingredient ثابت هویت
+لري او Medicine موجودو، بېلابېلو Ingredient IDs ته reference لري.
+دوا د تازه version په وسیله سمېږي او غیرفعاله کېدای شي. دواړه collections
+`mode: simulated`، `source: academic_demo_manual`، `sourceVersion: 1` او
+د واقعي درملنې لپاره د نه مناسب والي notice ساتي؛ sourceVersion د ازمایښتي
+بڼې نسخه ده، clinical provider release نه دی. بریالي ځوابونه، حتی تش لېست،
+`catalog` metadata لري. دا د manual academic catalog بنسټ دی؛ strength
+ښودنیز متن دی، د dose د محاسبې معلومات نه دي. تفصیل په `MEDICINE_API.md` کې دی.
+له پخوانیو نسخو او allergy متنونو سره mapping، بشپړ catalog audit او clinical
+knowledge integration لا پلان دي؛ عمومي AuditLog یې د تکمیل شرط پاتې دی.
 
 د Patient Allergies ثبت/review موجود دی؛ دا اتومات check نه دی.
 Create تل unconfirmed دی. PATCH reason او تازه version غواړي، confirmed یا
@@ -324,17 +341,25 @@ Base: `/api`. لاندې `{id}` د حقیقي ID ځای دی. Role د پورته
 | GET | `/patients/{id}/care-assignments` | مجاز staff |
 | POST | `/patients/{id}/care-assignments/{assignmentId}/revoke` | مجاز scheduler؛ audit reason |
 
-### Clinical history، medicines او prescriptions — پلان
+### Medicine Catalog — موجوده لومړۍ برخه
+
+| Method | Endpoint | موخه / لاسرسی |
+| --- | --- | --- |
+| POST | `/ingredients` | admin/hospital pharmacist خیالي جزء ثبتوي؛ code/name ثابت دي |
+| GET | `/ingredients` | مدیران/doctor؛ search او pagination |
+| GET | `/ingredients/{id}` | مدیران/doctor |
+| POST | `/medicines` | admin/hospital pharmacist؛ موجود distinct ingredient IDs |
+| GET | `/medicines` | مدیران ټول؛ doctor فعال؛ search/form/ingredient/isActive filters |
+| GET | `/medicines/{id}` | مدیران ټول؛ doctor فعاله دوا |
+| PATCH | `/medicines/{id}` | مدیران؛ تازه version، ثابت code او server provenance |
+
+### Clinical history، knowledge integration او prescriptions — پلان
 
 | Method | Endpoint | موخه / لاسرسی |
 | --- | --- | --- |
 | GET | `/patients/{id}/history` | treating doctor؛ admin د مجاز audit مقصد لپاره |
 | GET | `/medical-records/{id}` | د موجود endpoint راتلونکی غځول: د بل مجاز clinician/admin audit او verified patient scope |
 | GET | `/patients/{id}/allergies` | د موجود endpoint راتلونکی غځول: verified patient او CareAssignment scope |
-| GET | `/medicines` | مجاز doctor/pharmacist؛ search/filter/pagination |
-| POST | `/medicines` | catalog مجاز admin یا hospital pharmacist |
-| PATCH | `/medicines/{id}` | مجاز catalog manager؛ source نه جعل کوي |
-| GET | `/ingredients` | مجاز catalog او prescribing کاروونکي |
 | GET | `/medication-knowledge/status` | admin/doctor د mode/version/availability لپاره |
 | POST | `/medication-knowledge/import` | admin؛ ټاکل شوې مجازه source/schema |
 | PATCH | `/prescriptions/{id}` | د خپل unsigned draft سمون |
@@ -421,7 +446,7 @@ Export د response له لارې ورکول کېږي؛ نوی filesystem فول�
 | ۱ — یوه برخه جوړه | Doctor profile او خپل login session/logout شته؛ refresh، User مدیریت او audit پاتې دي | profile، permissions، inactive prescribing، session expiry او logout ازمویل شوي؛ phase لا نه دی بشپړ |
 | ۲ — یوه برخه جوړه | Appointments، slots، check-in، cancel/no-show او reschedule history شته؛ CareAssignment او patient booking پاتې دي | duplicate/concurrent booking/reschedule `409` او doctor scope ازمویل شوي؛ phase لا بشپړ نه دی |
 | ۳ — یوه برخه جوړه | خپل Medical Records او د روان ملاقات allergies/review/history شته؛ ګډ medical history او verified patient link پاتې دي | ownership، visit access، snapshots، stale version او concurrent writes ازمویل شوي |
-| ۴ | Medicine Catalog، ingredients او knowledge source integration | source/version/coverage مستند؛ simulated data نښه لري |
+| ۴ — یوه برخه جوړه | simulated Medicine Catalog او ingredients شته؛ معتبر knowledge source integration پاتې دی | source/version/محدودیت مستند؛ clinical coverage او provider لا نه شته |
 | ۵ | Drug Interaction او Allergy Checking | synthetic fixtures او unknown/provider failure سمې پایلې ورکوي |
 | ۶ | Prescription draft/check/sign، correction او cancellation | signed content immutable؛ stale check نه sign کېږي؛ trace/audit ساتل کېږي |
 | ۷ | Pharmacies، memberships، signed transmission او receipt/verification | approved recipient؛ د بل pharmacy لاسرسی منع؛ cancellation ښکاره |
@@ -450,18 +475,29 @@ CareAssignment د کاروونکي په غوښتنه فعلاً ځنډېدلی �
 
 د Patient Allergies لومړۍ برخه په `PATIENT_ALLERGY_API.md` کې ده. نوی راپور
 unconfirmed دی؛ clinical review اتومات نه دی. د نوم/نوع duplicate index او
-version خوندي history ساتي. Ingredient catalog او اتومات safety پړاوونه پاتې دي.
+version خوندي history ساتي. Ingredient catalog اوس شته؛ allergy mapping،
+معتبر knowledge integration او اتومات safety پړاوونه پاتې دي.
+
+د Medicine Catalog لومړۍ برخه په `MEDICINE_API.md` کې مستنده ده. ۷ endpoints،
+محدود roles، duplicate code conflict او version خوندي medicine update لري.
+دا simulated manual catalog دی؛ د دوا خوندي والي، معتبرې سرچینې، prescription
+mapping، inventory یا بشپړ AuditLog د بشپړېدو معنا نه لري.
 
 ## ۹. ازموینې، migration او د Backend بشپړتیا
 
 موجود Postman لارښودونه `PATIENT_API.md`، `PRESCRIPTION_API.md` او
 `docs/DOCTOR_API.md`، `docs/APPOINTMENT_API.md`، `docs/AUTH_API.md` او
-`docs/MEDICAL_RECORD_API.md` او `docs/PATIENT_ALLERGY_API.md` دي. Auth/session، Doctor، appointment، Medical Records او allergies suites په
+`docs/MEDICAL_RECORD_API.md`، `docs/PATIENT_ALLERGY_API.md` او `docs/MEDICINE_API.md` دي. Auth/session، Doctor، appointment، Medical Records، allergies او catalog suites په
 `controller/authController.test.js`، `controller/doctorController.test.js` او
-`controller/appointmentController.test.js`، `controller/medicalRecordController.test.js` او `controller/patientAllergyController.test.js` کې ساتل شوې او د `npm test` له لارې
+`controller/appointmentController.test.js`، `controller/medicalRecordController.test.js`، `controller/patientAllergyController.test.js` او `controller/medicineController.test.js` کې ساتل شوې او د `npm test` له لارې
 چلېږي. هر suite خپل موقتي MongoDB کاروي؛ `mongod` یا `MONGOD_BINARY` ورته پکار دی.
 د patient/prescription پخواني پراخ checks موقتي وو؛ د نورو modules دایمي
 coverage لا پاتې دی. نوي test فایلونه په همدې موجودو code فولډرونو کې راځي.
+
+هر ځل د بدلې شوې برخې focused tests او د اړتیا پر مهال اغېزمنې برخې چلوو.
+بشپړ suite د ګډ auth/middleware پراخو بدلونونو او مهمو milestones لپاره دی؛
+د اسنادو بدلون بریالۍ ازموینې بیا چلولو ته اړتیا نه لري. د ۲۰۲۶-۱۱-۲۳ catalog
+focused suite کې ۲۷ tests تېر شول؛ دا د ټولو پخوانیو suites د بیا چلولو ادعا نه ده.
 
 ازموینې مشخصه جلا test DB او خیالي fixtures کاروي؛ عادي DB نه پاکوي.
 د هر پړاو checks باید دا ولري:

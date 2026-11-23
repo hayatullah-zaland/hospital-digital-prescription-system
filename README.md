@@ -29,6 +29,9 @@ Doctor prescription creation and viewing are documented in
 د ناروغ حساسیتونه، د روانې معاینې اجازه، review او د بدلونونو تاریخچه:
 [docs/PATIENT_ALLERGY_API.md](docs/PATIENT_ALLERGY_API.md).
 
+د دواوو ازمایښتي فهرست، اجزا، اجازې او Postman ازموینه:
+[docs/MEDICINE_API.md](docs/MEDICINE_API.md).
+
 اوس authentication د **Bearer JWT او AuthSession** له لارې کار کوي.
 
 ```text
@@ -55,6 +58,9 @@ server.js → routes → middleware → controller → models
 - `models/PatientAllergy.js` او `controller/patientAllergyController.js`: حساسیتونه،
   review، version او تاریخچه؛ د خپل روان ملاقات doctor یې اداره کوي.
 - `middleware/patientAllergyAccess.js` او `patientAllergyValidation.js`: اجازه او input.
+- `models/Ingredient.js`، `models/Medicine.js` او `controller/medicineController.js`:
+  د دواوو simulated فهرست، ثابت اجزا، لټون او version لرونکی سمون.
+- `middleware/medicineValidation.js`: د دواوو/اجزاوو input او query validation.
 - `middleware/jsonErrorHandler.js`: ناسم JSON ته ساده JSON ځواب.
 
 د اوسني login logout او session revocation جوړ دي. Refresh-token flow،
@@ -70,6 +76,13 @@ pharmacy processing لا د پورته پلان برخه دي.
 د auth ازموینې او تازه token اخیستل په [AUTH_API.md](docs/AUTH_API.md) کې دي.
 د طبي ریکارډ ازموینه په [MEDICAL_RECORD_API.md](docs/MEDICAL_RECORD_API.md) کې ده.
 د حساسیتونو ازموینه په [PATIENT_ALLERGY_API.md](docs/PATIENT_ALLERGY_API.md) کې ده.
+
+د دواوو فهرست focused ازموینه `node --test controller/medicineController.test.js`
+ده؛ د ۲۰۲۶-۱۱-۲۳ ټولې ۲۷ ازموینې بریالۍ شوې. د دې بدلون لپاره پخواني
+suites بیا نه دي چلول شوي. د هرې برخې اړوند tests چلوو؛ بشپړ `npm test`
+د پراخ اغېز لرونکو بدلونونو او مهمو پړاوونو لپاره دی.
+دا catalog خیالي دی، د واقعي درملنې لپاره مناسب نه دی، او لا له نسخو،
+حساسیتونو یا inventory سره نه دی نښلول شوی.
 
 | Method | API | اجازه |
 | --- | --- | --- |

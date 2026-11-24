@@ -29,6 +29,9 @@ Doctor prescription creation and viewing are documented in
 د ناروغ حساسیتونه، د روانې معاینې اجازه، review او د بدلونونو تاریخچه:
 [docs/PATIENT_ALLERGY_API.md](docs/PATIENT_ALLERGY_API.md).
 
+د فعالو دواوو له اجزاوو سره د حساسیت simulated پرتله او Postman ازموینه:
+[docs/ALLERGY_CHECK_API.md](docs/ALLERGY_CHECK_API.md).
+
 د دواوو ازمایښتي فهرست، اجزا، اجازې او Postman ازموینه:
 [docs/MEDICINE_API.md](docs/MEDICINE_API.md).
 
@@ -58,6 +61,8 @@ server.js → routes → middleware → controller → models
 - `models/PatientAllergy.js` او `controller/patientAllergyController.js`: حساسیتونه،
   review، version، تاریخچه او اختیاري Ingredient mapping؛ د خپل روان ملاقات doctor یې اداره کوي.
 - `middleware/patientAllergyAccess.js` او `patientAllergyValidation.js`: اجازه او input.
+- `controller/allergyCheckController.js`: د خپل روان ملاقات لپاره simulated
+  allergy preview؛ exact IDs، warning/unknown/محدود clear او coverage.
 - `models/Ingredient.js`، `models/Medicine.js` او `controller/medicineController.js`:
   د دواوو simulated فهرست، ثابت اجزا، لټون او version لرونکی سمون.
 - `middleware/medicineValidation.js`: د دواوو/اجزاوو input او query validation.
@@ -84,7 +89,13 @@ suites بیا نه دي چلول شوي. د هرې برخې اړوند tests چ�
 د ۲۰۲۶-۱۱-۲۴ mapping بدلون لپاره د allergies او catalog دواړو focused suites
 ټولې ۷۸ ازموینې بریالۍ شوې؛ نور suites بیا نه دي چلول شوي.
 دا catalog خیالي دی او د واقعي درملنې لپاره مناسب نه دی. حساسیت له Ingredient
-سره په لاس نښلېږي؛ له نسخو، اتومات safety checks یا inventory سره نښلول لا پاتې دي.
+سره په لاس نښلېږي؛ له prescription lifecycle، معتبر clinical checking یا inventory سره نښلول لا پاتې دي.
+
+اوس د `POST /api/patients/:patientId/allergies/check` preview شته. د همدې ورځې
+وروستی focused run ۹۹ بریالۍ ازموینې لري: ۷۲ allergies/mapping/preview او ۲۷ catalog.
+`clear` یوازې په محدودې simulated ID پرتله کې match نه موندل دي؛ د دوا د
+واقعي خوندي والي یا د نسخې د sign کولو اجازه نه ده. معتبر provider، Drug
+Interaction Checking او له prescription revision سره ثابت check لا پاتې دي.
 
 | Method | API | اجازه |
 | --- | --- | --- |

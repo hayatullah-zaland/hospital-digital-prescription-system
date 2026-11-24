@@ -15,6 +15,30 @@ export const validateAllergyId = (req, res, next) => {
   next();
 };
 
+export function validateAllergyCheckInput(req, res, next) {
+  const body = req.body;
+  if (Object.keys(req.query).length > 0 || !body || typeof body !== 'object' || Array.isArray(body)) {
+    return res.status(400).json({ message: 'Send a JSON object without query parameters' });
+  }
+  for (const field of Object.keys(body)) {
+    if (field !== 'medicineIds') return res.status(400).json({ message: 'Send only medicineIds' });
+  }
+  if (!Array.isArray(body.medicineIds) || body.medicineIds.length < 1 || body.medicineIds.length > 20) {
+    return res.status(400).json({ message: 'Send 1 to 20 distinct medicine IDs' });
+  }
+  const medicineIds = [];
+  const seen = new Set();
+  for (const id of body.medicineIds) {
+    if (typeof id !== 'string' || !validator.isMongoId(id) || seen.has(id.toLowerCase())) {
+      return res.status(400).json({ message: 'Medicine IDs must be valid and distinct' });
+    }
+    seen.add(id.toLowerCase());
+    medicineIds.push(id.toLowerCase());
+  }
+  req.allergyMedicineIds = medicineIds;
+  next();
+}
+
 // POST کې اړین معلومات، او PATCH کې یوازې لېږل شوي معلومات چک کوو.
 export const validateAllergyInput = (req, res, next) => {
   const body = req.body;

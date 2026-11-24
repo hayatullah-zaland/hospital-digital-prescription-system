@@ -17,6 +17,7 @@ import Doctor from '../models/Doctor.js';
 import Appointment from '../models/Appointment.js';
 import PatientAllergy from '../models/PatientAllergy.js';
 import Ingredient, { catalogSource } from '../models/Ingredient.js';
+import Medicine from '../models/Medicine.js';
 import authRoutes from '../routes/authRoutes.js';
 import patientRoutes from '../routes/patientRoutes.js';
 import appointmentRoutes from '../routes/appointmentRoutes.js';
@@ -71,6 +72,18 @@ async function checkAllEndpoints(account, expected, patientIndex = 0) {
   await request('GET', route(patientIndex), account, undefined, expected);
   await request('GET', route(patientIndex, id), account, undefined, expected);
   await request('PATCH', route(patientIndex, id), account, change({ version: 0 }, { notes: 'Fictional update' }), expected);
+  await request('POST', route(patientIndex) + '/check', account, { medicineIds: [id] }, expected);
+}
+
+async function createCheckMedicine(ingredientIds = [ingredients[0]._id], code = 'DEMO-CHECK-A') {
+  return Medicine.create({ code, name: 'Fictional ' + code, strength: '10 demo units', form: 'tablet', ingredients: ingredientIds, createdBy: users.hospital_admin._id, updatedBy: users.hospital_admin._id });
+}
+
+async function checkAllergies(medicineIds, patientIndex = 0) {
+  const result = await request('POST', route(patientIndex) + '/check', 'doctor', { medicineIds }, 200);
+  assert.deepEqual(result.catalog, catalogSource);
+  assert.equal(result.check.mode, 'simulated');
+  return result.check;
 }
 
 before(async () => {
@@ -87,7 +100,7 @@ before(async () => {
   ], { windowsHide: true, stdio: 'ignore' });
   await once(mongoProcess, 'spawn');
   await mongoose.connect(`mongodb://127.0.0.1:${mongoPort}/patient_allergy_tests`, { serverSelectionTimeoutMS: 15000 });
-  await Promise.all([User.init(), AuthSession.init(), Doctor.init(), Appointment.init(), PatientAllergy.init(), Ingredient.init()]);
+  await Promise.all([User.init(), AuthSession.init(), Doctor.init(), Appointment.init(), PatientAllergy.init(), Ingredient.init(), Medicine.init()]);
   const app = express();
   app.use(express.json());
   app.use(handleJsonErrors);
@@ -111,6 +124,7 @@ before(async () => {
 
 beforeEach(async () => {
   await PatientAllergy.deleteMany({});
+  await Medicine.deleteMany({});
   await Ingredient.deleteMany({});
   ingredients = await Ingredient.create([
     { code: 'DEMO-I-A', name: 'Fictional Component A', createdBy: users.hospital_admin._id },
@@ -702,4 +716,252 @@ test('legacy records read as unmapped without a database rewrite and retain old 
   const saved = await PatientAllergy.collection.findOne(filter);
   assert.deepEqual(saved.history[0], legacy.history[0]);
   assert.equal(saved.history[1].snapshot.ingredient.toString(), ingredients[0].id);
+});
+
+test('allergy preview warns on an exact unconfirmed ingredient match and includes server evidence', async () => {
+  const medicine = await createCheckMedicine();
+  const allergy = await createAllergy({ ...details(), ingredientId: ingredients[0].id });
+  const check = await checkAllergies([medicine.id]);
+  assert.equal(check.type, 'allergy_preview');
+  assert.equal(check.status, 'warning');
+  assert.equal(check.patientId, patients[0].id);
+  assert.equal(check.appointmentId, appointments.own.id);
+  assert.equal(check.checkedBy, users.doctor.id);
+  assert.ok(check.checkedAt);
+  assert.deepEqual(check.medicines, [{ medicineId: medicine.id, name: medicine.name, version: 0 }]);
+  assert.deepEqual(check.allergyVersions, [{ allergyId: allergy._id, version: 0 }]);
+  assert.deepEqual(check.coverage, { complete: true, medicineCount: 1, allergyReportsChecked: 1, issues: [] });
+  assert.equal(check.findings.length, 1);
+  assert.equal(check.findings[0].medicineId, medicine.id);
+  assert.equal(check.findings[0].allergyId, allergy._id);
+  assert.equal(check.findings[0].ingredientId, ingredients[0].id);
+  assert.equal(check.findings[0].ingredientName, ingredients[0].name);
+  assert.equal(check.findings[0].verificationStatus, 'unconfirmed');
+  assert.equal(check.findings[0].reaction, allergy.reaction);
+});
+
+test('confirmed allergy and sensitivity reports both produce preview findings', async () => {
+  const medicine = await createCheckMedicine();
+  for (const kind of ['allergy', 'sensitivity']) {
+    const allergy = await createAllergy({ ...details(), kind, ingredientId: ingredients[0].id });
+    await request('PATCH', route(0, allergy._id), 'doctor', change(allergy, { verificationStatus: 'confirmed' }), 200);
+  }
+  const check = await checkAllergies([medicine.id]);
+  assert.equal(check.findings.length, 2);
+  assert.deepEqual(check.findings.map(finding => finding.kind).sort(), ['allergy', 'sensitivity']);
+  for (const finding of check.findings) assert.equal(finding.verificationStatus, 'confirmed');
+});
+
+test('complete simulated comparison without an exact match returns limited clear status', async () => {
+  const medicine = await createCheckMedicine();
+  await createAllergy({ ...details(), ingredientId: ingredients[1].id });
+  const check = await checkAllergies([medicine.id]);
+  assert.equal(check.status, 'clear');
+  assert.equal(check.coverage.complete, true);
+  assert.deepEqual(check.findings, []);
+});
+
+test('no recorded allergy history remains unknown rather than assuming no allergies', async () => {
+  const medicine = await createCheckMedicine();
+  const check = await checkAllergies([medicine.id]);
+  assert.equal(check.status, 'unknown');
+  assert.deepEqual(check.coverage.issues, [{ code: 'no_active_allergy_reports' }]);
+  assert.equal(check.coverage.complete, false);
+});
+
+test('unmapped reports never match by name and prevent a clear result', async () => {
+  const medicine = await createCheckMedicine();
+  const allergy = await createAllergy({ ...details(), substance: ingredients[0].name });
+  const check = await checkAllergies([medicine.id]);
+  assert.equal(check.status, 'unknown');
+  assert.deepEqual(check.findings, []);
+  assert.deepEqual(check.coverage.issues, [{ code: 'unmapped_allergy', allergyId: allergy._id }]);
+});
+
+test('a known warning remains visible when another allergy has incomplete mapping', async () => {
+  const medicine = await createCheckMedicine();
+  const mapped = await createAllergy({ ...details(), ingredientId: ingredients[0].id });
+  await createAllergy({ ...details(), substance: 'Fictional unmapped report' });
+  const check = await checkAllergies([medicine.id]);
+  assert.equal(check.status, 'warning');
+  assert.equal(check.coverage.complete, false);
+  assert.equal(check.findings[0].allergyId, mapped._id);
+  assert.equal(check.coverage.issues[0].code, 'unmapped_allergy');
+});
+
+test('refuted reports are excluded but refuted-only history does not prove absence of allergies', async () => {
+  const medicine = await createCheckMedicine();
+  const allergy = await createAllergy({ ...details(), ingredientId: ingredients[0].id });
+  await request('PATCH', route(0, allergy._id), 'doctor', change(allergy, { verificationStatus: 'refuted' }), 200);
+  let check = await checkAllergies([medicine.id]);
+  assert.equal(check.status, 'unknown');
+  assert.equal(check.coverage.issues[0].code, 'no_active_allergy_reports');
+  await createAllergy({ ...details(), substance: 'Fictional unrelated report', ingredientId: ingredients[1].id });
+  check = await checkAllergies([medicine.id]);
+  assert.equal(check.status, 'clear');
+  assert.equal(check.allergyVersions.length, 1);
+  assert.equal(check.findings.length, 0);
+  assert.equal(await PatientAllergy.countDocuments(), 2);
+});
+
+test('allergy preview ignores reports belonging to another patient', async () => {
+  const medicine = await createCheckMedicine();
+  await createAllergy({ ...details(), ingredientId: ingredients[1].id });
+  const other = await createAllergy({ ...details(), ingredientId: ingredients[0].id }, 2);
+  const check = await checkAllergies([medicine.id]);
+  assert.equal(check.status, 'clear');
+  assert.equal(check.allergyVersions.length, 1);
+  assert.equal(check.allergyVersions.some(entry => entry.allergyId === other._id), false);
+});
+
+test('multiple and combination medicines report each matching report without duplicate ingredient findings', async () => {
+  const combination = await createCheckMedicine([ingredients[0]._id, ingredients[1]._id]);
+  const second = await createCheckMedicine([ingredients[1]._id], 'DEMO-CHECK-B');
+  await createAllergy({ ...details(), ingredientId: ingredients[0].id });
+  await createAllergy({ ...details(), substance: 'Fictional second report', ingredientId: ingredients[1].id });
+  const check = await checkAllergies([combination.id, second.id]);
+  assert.equal(check.findings.length, 3);
+  assert.equal(check.coverage.medicineCount, 2);
+  await Medicine.updateOne({ _id: second._id }, { $set: { ingredients: [ingredients[1]._id, ingredients[1]._id] } });
+  const repeated = await checkAllergies([second.id]);
+  assert.equal(repeated.findings.length, 1);
+});
+
+test('preview uses reports beyond the ordinary list page', async () => {
+  const medicine = await createCheckMedicine();
+  for (let index = 0; index < 11; index++) {
+    await createAllergy({ ...details(), substance: 'Fictional report ' + index, ingredientId: ingredients[1].id });
+  }
+  await createAllergy({ ...details(), substance: 'Fictional final match', ingredientId: ingredients[0].id });
+  const check = await checkAllergies([medicine.id]);
+  assert.equal(check.status, 'warning');
+  assert.equal(check.coverage.allergyReportsChecked, 12);
+  assert.equal(check.findings.length, 1);
+});
+
+test('preview is read only and never appends allergy history or changes medicine versions', async () => {
+  const medicine = await createCheckMedicine();
+  const allergy = await createAllergy({ ...details(), ingredientId: ingredients[0].id });
+  const previousAllergy = await PatientAllergy.collection.findOne({ _id: new mongoose.Types.ObjectId(allergy._id) });
+  const previousMedicine = await Medicine.collection.findOne({ _id: medicine._id });
+  await checkAllergies([medicine.id]);
+  assert.deepEqual(await PatientAllergy.collection.findOne({ _id: previousAllergy._id }), previousAllergy);
+  assert.deepEqual(await Medicine.collection.findOne({ _id: medicine._id }), previousMedicine);
+});
+
+test('a later preview reads current medicine and allergy versions after edits', async () => {
+  const medicine = await createCheckMedicine();
+  const allergy = await createAllergy({ ...details(), ingredientId: ingredients[0].id });
+  assert.equal((await checkAllergies([medicine.id])).status, 'warning');
+  medicine.ingredients = [ingredients[1]._id];
+  await medicine.save();
+  let check = await checkAllergies([medicine.id]);
+  assert.equal(check.status, 'clear');
+  assert.equal(check.medicines[0].version, 1);
+  await request('PATCH', route(0, allergy._id), 'doctor', change(allergy, { ingredientId: ingredients[1].id }), 200);
+  check = await checkAllergies([medicine.id]);
+  assert.equal(check.status, 'warning');
+  assert.equal(check.allergyVersions[0].version, 1);
+});
+
+test('missing or inactive medicines reject the entire preview without partial findings', async () => {
+  const medicine = await createCheckMedicine();
+  const missing = new mongoose.Types.ObjectId().toString();
+  for (const medicineIds of [[missing], [medicine.id, missing]]) {
+    const result = await request('POST', route() + '/check', 'doctor', { medicineIds }, 404);
+    assert.equal(result.check, undefined);
+  }
+  await Medicine.updateOne({ _id: medicine._id }, { $set: { isActive: false } });
+  await request('POST', route() + '/check', 'doctor', { medicineIds: [medicine.id] }, 404);
+});
+
+test('preview validates medicine arrays, duplicate IDs, unknown fields and query overrides', async () => {
+  const medicine = await createCheckMedicine();
+  for (const body of [undefined, null, [], {}, { medicineIds: [] }, { medicineIds: 'bad' }, { medicineIds: ['bad'] }, { medicineIds: [null] }, { medicineIds: [1] }, { medicineIds: [medicine.id, medicine.id.toUpperCase()] }, { medicineIds: Array(21).fill(medicine.id) }]) {
+    await request('POST', route() + '/check', 'doctor', body, 400);
+  }
+  for (const field of ['patientId', 'allergyIds', 'ingredients', 'isActive', 'mode', 'source', 'sourceVersion', 'status', 'checkedBy', 'findings']) {
+    await request('POST', route() + '/check', 'doctor', { medicineIds: [medicine.id], [field]: 'forged' }, 400);
+  }
+  await request('POST', route() + '/check?patientId=' + patients[2].id, 'doctor', { medicineIds: [medicine.id] }, 400);
+  assert.equal(await PatientAllergy.countDocuments(), 0);
+});
+
+test('uppercase medicine IDs are normalized before database comparison', async () => {
+  const medicine = await createCheckMedicine();
+  await createAllergy({ ...details(), ingredientId: ingredients[0].id });
+  const check = await checkAllergies([medicine.id.toUpperCase()]);
+  assert.equal(check.status, 'warning');
+  assert.equal(check.medicines[0].medicineId, medicine.id);
+});
+
+test('a missing ingredient makes both medicine and allergy coverage incomplete', async () => {
+  const medicine = await createCheckMedicine();
+  await createAllergy({ ...details(), ingredientId: ingredients[0].id });
+  await Ingredient.deleteOne({ _id: ingredients[0]._id });
+  const check = await checkAllergies([medicine.id]);
+  assert.equal(check.status, 'unknown');
+  assert.equal(check.coverage.complete, false);
+  assert.deepEqual(check.coverage.issues.map(issue => issue.code).sort(), ['unavailable_allergy_mapping', 'unavailable_medicine_ingredient']);
+});
+
+test('empty or absent medicine ingredient lists cannot yield a clear result', async () => {
+  const medicine = await createCheckMedicine();
+  await createAllergy({ ...details(), ingredientId: ingredients[0].id });
+  for (const update of [{ $set: { ingredients: [] } }, { $unset: { ingredients: '' } }]) {
+    await Medicine.collection.updateOne({ _id: medicine._id }, update);
+    const check = await checkAllergies([medicine.id]);
+    assert.equal(check.status, 'unknown');
+    assert.equal(check.coverage.issues[0].code, 'missing_medicine_ingredients');
+  }
+});
+
+test('unsupported medicine provenance or source versions remain unknown', async () => {
+  const medicine = await createCheckMedicine();
+  await createAllergy({ ...details(), ingredientId: ingredients[0].id });
+  for (const fields of [{ mode: 'validated' }, { source: 'unsupported' }, { sourceVersion: 'old-version' }]) {
+    await Medicine.collection.updateOne({ _id: medicine._id }, { $set: { mode: catalogSource.mode, source: catalogSource.source, sourceVersion: catalogSource.sourceVersion, ...fields } });
+    const check = await checkAllergies([medicine.id]);
+    assert.equal(check.status, 'unknown');
+    assert.equal(check.coverage.issues[0].code, 'unsupported_medicine_source');
+    assert.equal(check.findings.length, 0);
+  }
+});
+
+test('stale mapping snapshots and changed ingredient identities cannot produce false clear results', async () => {
+  const medicine = await createCheckMedicine();
+  const allergy = await createAllergy({ ...details(), ingredientId: ingredients[0].id });
+  await PatientAllergy.collection.updateOne({ _id: new mongoose.Types.ObjectId(allergy._id) }, { $set: { 'ingredientSnapshot.sourceVersion': 'old-version' } });
+  let check = await checkAllergies([medicine.id]);
+  assert.equal(check.status, 'unknown');
+  assert.equal(check.coverage.issues[0].code, 'unavailable_allergy_mapping');
+  await PatientAllergy.collection.updateOne({ _id: new mongoose.Types.ObjectId(allergy._id) }, { $set: { 'ingredientSnapshot.sourceVersion': catalogSource.sourceVersion } });
+  await Ingredient.collection.updateOne({ _id: ingredients[0]._id }, { $set: { name: 'Fictional changed catalog identity' } });
+  check = await checkAllergies([medicine.id]);
+  assert.equal(check.status, 'unknown');
+  assert.equal(check.coverage.issues[0].code, 'unavailable_allergy_mapping');
+});
+
+test('bounded allergy preview marks truncated coverage and preserves visible warnings', async () => {
+  const medicine = await createCheckMedicine();
+  const allergy = await createAllergy({ ...details(), ingredientId: ingredients[0].id });
+  const template = await PatientAllergy.findById(allergy._id).lean();
+  const reports = [];
+  for (let index = 0; index < 200; index++) {
+    reports.push({ ...template, _id: new mongoose.Types.ObjectId(), substance: 'Fictional bounded report ' + index, substanceKey: 'fictional bounded report ' + index, history: [] });
+  }
+  await PatientAllergy.insertMany(reports);
+  const check = await checkAllergies([medicine.id]);
+  assert.equal(check.status, 'warning');
+  assert.equal(check.coverage.complete, false);
+  assert.equal(check.coverage.allergyReportsChecked, 200);
+  assert.equal(check.coverage.issues[0].code, 'allergy_limit_exceeded');
+  assert.equal(check.findings.length, 200);
+});
+
+test('allergy preview validates patient IDs before looking up medicines', async () => {
+  const medicine = await createCheckMedicine();
+  for (const [patientId, expected] of [['bad', 400], [new mongoose.Types.ObjectId().toString(), 404]]) {
+    await request('POST', `/api/patients/${patientId}/allergies/check`, 'doctor', { medicineIds: [medicine.id] }, expected);
+  }
 });

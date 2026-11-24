@@ -5,7 +5,8 @@
 
 د Patient Allergies لومړۍ برخه جوړه ده: ثبت، کتنه، review او د سمون
 تاریخچه. د Medicine Catalog ازمایښتي بنسټ اوس په `MEDICINE_API.md` کې دی؛
-اختیاري ingredient mapping اوس شته؛ اتومات allergy checking او معتبره معلوماتي سرچینه لا پاتې دي.
+اختیاري ingredient mapping او د exact IDs ازمایښتي preview اوس شته؛
+[ALLERGY_CHECK_API.md](ALLERGY_CHECK_API.md) یې لارښود دی. معتبر clinical checking لا پاتې دی.
 
 ## ۱. اړیکې او د کوډ مسیر
 
@@ -22,7 +23,8 @@
 - `middleware/patientAllergyAccess.js`: فعال doctor او خپل روان ملاقات.
 - `middleware/patientAllergyValidation.js`: د `validator` په وسیله input چک.
 - `controller/patientAllergyController.js`: ثبت، لېست، کتنه او سمون.
-- `routes/patientAllergyRoutes.js`: څلور لارې؛ په `patientRoutes.js` کې نښلي.
+- `routes/patientAllergyRoutes.js`: څلور د ثبت/کتنې لارې او یو preview؛ په `patientRoutes.js` کې نښلي.
+- `controller/allergyCheckController.js`: simulated exact ingredient ID پرتله.
 - `middleware/jsonErrorHandler.js`: ناسم JSON ته ساده `400` JSON ځواب.
 - `controller/patientAllergyController.test.js`: دایمي ازموینې.
 
@@ -100,6 +102,7 @@ Base URL: `http://localhost:5000`.
 | GET | `/api/patients/PATIENT_ID/allergies` | د همدې ناروغ لېست او filters |
 | GET | `/api/patients/PATIENT_ID/allergies/ALLERGY_ID` | بشپړ ریکارډ او history |
 | PATCH | `/api/patients/PATIENT_ID/allergies/ALLERGY_ID` | سمون یا review له دلیل سره |
+| POST | `/api/patients/PATIENT_ID/allergies/check` | د فعالو دواوو simulated allergy preview؛ د پورته جلا لارښود له مخې |
 
 `PATIENT_ID` د Patient ریکارډ `_id` دی، د login User ID نه دی.
 ټول ځوابونه `Cache-Control: no-store` لري. لېست history نه راوړي؛ detail یې راوړي.
@@ -280,6 +283,9 @@ modules tests په دې پړاو کې بیا نه دي چلول شوي؛ بشپ�
 هر suite خپله جلا temporary DB کاروي؛ د application `.env` نه لولي او
 عادي database نه پاکوي.
 
-د حساسیتونو ثبت، review او اختیاري manual mapping شته. اتومات allergy او
-interaction checking، معتبر knowledge source، Patient Portal او عمومي
+وروسته د همدې ورځې preview پړاو کې focused suite ۹۹ بریالۍ ازموینې لرلې؛
+جزئیات په [ALLERGY_CHECK_API.md](ALLERGY_CHECK_API.md) کې دي.
+
+د حساسیتونو ثبت، review، manual mapping او simulated preview شته. معتبر clinical
+allergy checking، interaction checking، knowledge source، Patient Portal او عمومي
 AuditLog لا پاتې دي. Embedded history د همدې ریکارډ trace دی.

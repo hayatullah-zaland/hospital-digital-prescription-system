@@ -1,16 +1,22 @@
 # د ناروغ حساسیتونه — ساده تشریح او د Postman لارښود
 
 نېټه: ۲۰۲۶-۱۱-۲۲
+د ingredient mapping تازه کول: ۲۰۲۶-۱۱-۲۴
 
 د Patient Allergies لومړۍ برخه جوړه ده: ثبت، کتنه، review او د سمون
 تاریخچه. د Medicine Catalog ازمایښتي بنسټ اوس په `MEDICINE_API.md` کې دی؛
-اتومات allergy checking لا ingredient mapping او معتبرې معلوماتي سرچینې ته اړتیا لري.
+اختیاري ingredient mapping اوس شته؛ اتومات allergy checking او معتبره معلوماتي سرچینه لا پاتې دي.
 
 ## ۱. اړیکې او د کوډ مسیر
 
 یو Patient څو PatientAllergy ریکارډونه لري. `recordedBy` د لومړي ثبتوونکي
 د User حساب ID دی. هر history entry خپل actor، د روان ملاقات ID، وخت،
 دلیل او د هماغه وخت د معلوماتو کاپي لري.
+
+اختیاري `ingredient` د موجود Ingredient `_id` ته reference دی.
+`ingredientSnapshot` د ټاکلو پر وخت code، name، mode، source، sourceVersion
+او notice ساتي. همدا reference او کاپي د history په snapshot کې هم شته.
+بې‌mapping او پخواني ریکارډونه په API کې د دواړو fields لپاره `null` لري.
 
 - `models/PatientAllergy.js`: fields، history، indexes او version.
 - `middleware/patientAllergyAccess.js`: فعال doctor او خپل روان ملاقات.
@@ -29,6 +35,8 @@ Postman → patientRoutes (protect) → allergyRoutes (doctor role)
 لومړی model، بیا access middleware او `createPatientAllergy` ولولئ.
 په update کې هر field خپل واضح `if` او assignment لري. د تاریخچې د
 تکراري کوډ د مخنیوي لپاره `appendAllergyHistory` یوه کوچنۍ جلا دنده ده.
+`setAllergyIngredient` په create/update کې د جزء موجودیت او سرچینه چک کوي
+او server-owned کاپي جوړوي. نوی route، فولډر یا جلا collection نه دی زیات شوی.
 
 ## ۲. د اجازې قواعد
 
@@ -51,6 +59,7 @@ Patient Portal او د اډمین audited clinical access راتلونکی کا�
 | Field | قاعده |
 | --- | --- |
 | `substance` | اړین متن، trim وروسته 2–150 حروف؛ د مادې راپور شوی نوم |
+| `ingredientId` | اختیاري MongoDB ID یا `null`؛ موجود simulated جزء ټاکي، null اړیکه لرې کوي |
 | `kind` | `allergy` یا `sensitivity` |
 | `reaction` | اړین متن، 2–500 حروف؛ راپور شوی غبرګون |
 | `source` | `patient_reported`، `medical_record` یا `clinician_observed` |
@@ -66,17 +75,20 @@ Create تل `unconfirmed` دی. په create کې verificationStatus یوازې
 
 سرور د confirmed/refuted ارزونې لپاره `reviewedBy` او `reviewedAt` ټاکي.
 Unconfirmed کول دا اوسني values null کوي؛ پخوانۍ ارزونه په history کې پاتې ده.
-د substance، kind، reaction یا source حقیقي بدلون پخوانی تایید unconfirmed
+د substance، ingredient، kind، reaction یا source حقیقي بدلون پخوانی تایید unconfirmed
 کوي، مګر که doctor په هماغه PATCH کې په څرګنده verificationStatus هم ورکړي.
 یوازې notes بدلول تایید نه ختموي. بې‌بدلونه PATCH `400` دی.
 
 Patient، recordedBy، updatedBy، reviewedBy/At، history او timestamps سرور
-ټاکي؛ له Body څخه نه منل کېږي. `ingredientId` لا نه منل کېږي.
+ټاکي؛ له Body څخه نه منل کېږي. د جزء لپاره یوازې `ingredientId` لېږئ؛
+`ingredient`، `ingredientSnapshot` او د mapping سرچینې metadata سرور ټاکي.
 
 د duplicate پر مهال کوچني/لوی حروف او تکراري whitespace یو شان دي.
 د یوه patient لپاره د هماغه نوم او kind دوهم ریکارډ `409` دی، حتی که لومړی
 refuted وي؛ موجود ریکارډ سم کړئ. دا یوازې د نوم د تکرار مخنیوی دی؛
-د دواوو مترادف نومونه، ingredients او طبي هویت نه پېژني.
+د دواوو مترادف نومونه او طبي هویت نه پېژني. Ingredient mapping د doctor
+څرګند انتخاب دی؛ د نوم له برابرۍ څخه په خپله اړیکه نه جوړېږي. د یوه جزء
+سره بېلابېل راپور شوي نومونه نښلېدای شي؛ اوسنی unique index د نوم/kind پر بنسټ دی.
 
 ## ۴. API لارې
 
@@ -186,21 +198,88 @@ PATCH http://localhost:5000/api/patients/PATIENT_ID/allergies/ALLERGY_ID
 هممهاله سمونونه `409` ورکوي؛ GET بیا واخلئ، بدلون وارزوئ او بیا یې ولېږئ.
 معلومات او نوې history entry په یوه atomic document save کې ثبتېږي.
 
-## ۹. ازموینې او پاتې کار
+## ۹. د جزء ټاکل، بدلول او لرې کول
+
+د خپل روان ملاقات doctor token وکاروئ. لومړی موجود خیالي اجزا ولټوئ:
+
+```http
+GET http://localhost:5000/api/ingredients?search=Fictional
+```
+
+د ټاکلي جزء `_id` کاپي کړئ. که جزء نه وي، اډمین یا hospital pharmacist یې
+د [MEDICINE_API.md](MEDICINE_API.md) له مخې جوړوي. Doctor یې کتلای شي، خو
+نه یې جوړولای شي او نه د بل ناروغ له allergy سره د خپلې اجازې بهر نښلولای شي.
+
+د موجود حساسیت لپاره هماغه PATCH دی:
+
+```http
+PATCH http://localhost:5000/api/patients/PATIENT_ID/allergies/ALLERGY_ID
+```
+
+```json
+{
+  "ingredientId": "INGREDIENT_ID",
+  "reason": "Fictional ingredient mapping for API testing",
+  "version": 2
+}
+```
+
+`INGREDIENT_ID` په اصلي ID بدل کړئ. دلته `2` د پورته مثالونو وروستی version
+دی؛ که ستاسو ریکارډ بل version لري، هماغه تازه شمېره وکاروئ.
+تمه: `200`، version `3`، `ingredient` ټاکلی ID او `ingredientSnapshot` د جزء
+سرور ټاکلی نوم/کوډ او ازمایښتي source metadata لري. نوی history entry هم
+همدا کاپي، actor، appointment، reason او وخت لري. د نوي allergy په POST کې
+هم اختیاري `ingredientId` ورزیاتولای شئ؛ نوی راپور بیا هم unconfirmed دی.
+
+د جزء د بدلولو لپاره بل موجود ID، دلیل او تازه version ولېږئ. د اړیکې
+لرې کول:
+
+```json
+{
+  "ingredientId": null,
+  "reason": "Remove a fictional incorrect mapping",
+  "version": 3
+}
+```
+
+اوس `ingredient` او `ingredientSnapshot` دواړه null او version `4` دي؛
+پخوانی mapping په history کې خوندي دی. په PATCH کې د ingredientId نه لېږل
+اړیکه ساتي. استثنا: که substance واقعاً بدل شي او ingredientId ونه لېږل شي،
+پخوانۍ اړیکه پاکېږي. د نوي نوم لپاره جزء په څرګنده بیا وټاکئ، حتی که ID هماغه وي.
+
+د mapping زیاتول، بدلول یا لرې کول پخوانی clinical review unconfirmed کوي؛
+reviewedBy/At null کېږي. Doctor کولای شي په هماغه PATCH کې نوی
+verificationStatus هم په څرګنده ورکړي. دا simulated mapping په معتبر طبي
+معلوماتو نه بدلوي. یوازې notes یا عین ID بیا لېږل mapping نه بدلوي؛ بې‌بدلونه
+PATCH `400` دی. ناسم ID `400` او ناموجود/د اوسني simulated catalog بهر جزء `404` دی.
+
+پخواني ریکارډونه نه migrate کوو، نه پاکوو او نه یې له نومه ingredient اټکل کوو.
+GET عادي DB نه بدلوي. په پخوانۍ history کې د mapping fields نشتوالی د هغه
+وخت «mapping نه و ثبت شوی» معنا لري؛ د اوسني جزء معلومات ورته نه ورزیاتېږي.
+
+## ۱۰. ازموینې او پاتې کار
 
 - ناسم input، ID، query، reason، version یا metadata: **400**.
 - ورک، ختم شوی یا logged-out session: **401**.
 - ناسم role، inactive profile یا خپل روان ملاقات نه لرل: **403**.
-- ناموجود patient، allergy یا د بل patient allergy: **404**.
+- ناموجود patient، allergy، د بل patient allergy یا ناموجود catalog ingredient: **404**.
 - duplicate، زوړ version یا concurrent save: **409**.
 - ناسم JSON ساده **400** JSON ځواب لري؛ request body او stack نه ښکاره کوي.
 
-د Backend له فولډره `npm test` وچلوئ. د ۲۰۲۶-۱۱-۲۲ پایله **۱۷۵ بریالۍ**
-ازموینې ده: ۳۶ allergies، ۲۷ Medical Records، ۳۳ auth/session، ۵۳ doctor او
-۲۶ appointments. `mongod` باید په PATH کې وي یا `MONGOD_BINARY` وټاکئ.
+د دې بدلون اړوند focused ازموینې:
+
+```powershell
+node --test controller/patientAllergyController.test.js controller/medicineController.test.js
+```
+
+د ۲۰۲۶-۱۱-۲۴ پایله **۷۸ بریالۍ، صفر ناکامې** ده: ۵۱ allergies او ۲۷ catalog.
+Mapping create/update/clear، سرچینه، review reset، permissions، legacy read،
+نه بدلېدونکې history او concurrent writes پکې ازمویل شوي. د ټولو نورو
+modules tests په دې پړاو کې بیا نه دي چلول شوي؛ بشپړ `npm test` د پراخو
+بدلونونو یا مهمو milestones لپاره دی. `mongod` په PATH کې یا `MONGOD_BINARY` کې وټاکئ.
 هر suite خپله جلا temporary DB کاروي؛ د application `.env` نه لولي او
 عادي database نه پاکوي.
 
-دا د حساسیتونو د ثبت او review لومړۍ برخه ده. اتومات ingredient matching،
+د حساسیتونو ثبت، review او اختیاري manual mapping شته. اتومات allergy او
 interaction checking، معتبر knowledge source، Patient Portal او عمومي
 AuditLog لا پاتې دي. Embedded history د همدې ریکارډ trace دی.

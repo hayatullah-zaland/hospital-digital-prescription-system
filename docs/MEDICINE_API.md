@@ -4,7 +4,9 @@
 
 د Medicine Catalog لومړۍ برخه جوړه ده: د اجزاوو ثبت او کتنه، او د دواوو
 ثبت، لټون، فلټر، کتنه او سمون. دا inventory نه دی؛ مقدار، بیه او stock
-لا نه ساتي. اوسنی Prescription او PatientAllergy لا ورسره نه دي نښلول شوي.
+لا نه ساتي. اوسنی Prescription لا ورسره نه دی نښلول شوی. د ۲۰۲۶-۱۱-۲۴ راهیسې
+PatientAllergy له Ingredient سره اختیاري manual mapping لري؛
+[PATIENT_ALLERGY_API.md](PATIENT_ALLERGY_API.md) یې ګامونه ښيي.
 
 ټول معلومات د زده کړې لپاره خیالي او په لاس داخلېږي. په DB او د بریالي
 API ځواب په `catalog` کې دا نښې شته:
@@ -182,6 +184,6 @@ node --test controller/medicineController.test.js
 نه کاروي. `mongod` په PATH کې یا `MONGOD_BINARY` کې پکار دی.
 
 پاتې کار: معتبر knowledge provider، clinical coverage/source updates،
-د PatientAllergy ingredient mapping، Interaction/Allergy Checking،
+Interaction/Allergy Checking،
 له structured prescription سره نښلول، signed snapshots، عمومي AuditLog،
 pharmacy approval او inventory. اوسنی فهرست هېڅ دوا «خوندي» نه اعلانوي.

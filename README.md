@@ -56,7 +56,7 @@ server.js → routes → middleware → controller → models
 - `middleware/medicalRecordValidation.js` او `medicalRecordAccess.js`: input،
   فعال doctor profile او د لیکلو اجازه؛ د نورو ډاکټرانو ګډ history لا پاتې دی.
 - `models/PatientAllergy.js` او `controller/patientAllergyController.js`: حساسیتونه،
-  review، version او تاریخچه؛ د خپل روان ملاقات doctor یې اداره کوي.
+  review، version، تاریخچه او اختیاري Ingredient mapping؛ د خپل روان ملاقات doctor یې اداره کوي.
 - `middleware/patientAllergyAccess.js` او `patientAllergyValidation.js`: اجازه او input.
 - `models/Ingredient.js`، `models/Medicine.js` او `controller/medicineController.js`:
   د دواوو simulated فهرست، ثابت اجزا، لټون او version لرونکی سمون.
@@ -81,8 +81,10 @@ pharmacy processing لا د پورته پلان برخه دي.
 ده؛ د ۲۰۲۶-۱۱-۲۳ ټولې ۲۷ ازموینې بریالۍ شوې. د دې بدلون لپاره پخواني
 suites بیا نه دي چلول شوي. د هرې برخې اړوند tests چلوو؛ بشپړ `npm test`
 د پراخ اغېز لرونکو بدلونونو او مهمو پړاوونو لپاره دی.
-دا catalog خیالي دی، د واقعي درملنې لپاره مناسب نه دی، او لا له نسخو،
-حساسیتونو یا inventory سره نه دی نښلول شوی.
+د ۲۰۲۶-۱۱-۲۴ mapping بدلون لپاره د allergies او catalog دواړو focused suites
+ټولې ۷۸ ازموینې بریالۍ شوې؛ نور suites بیا نه دي چلول شوي.
+دا catalog خیالي دی او د واقعي درملنې لپاره مناسب نه دی. حساسیت له Ingredient
+سره په لاس نښلېږي؛ له نسخو، اتومات safety checks یا inventory سره نښلول لا پاتې دي.
 
 | Method | API | اجازه |
 | --- | --- | --- |

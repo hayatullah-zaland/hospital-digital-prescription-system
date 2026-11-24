@@ -22,8 +22,8 @@ export const validateAllergyInput = (req, res, next) => {
     return res.status(400).json({ message: 'Please send allergy details as a JSON object' });
   }
   const isCreating = req.method === 'POST';
-  const clinicalFields = ['substance', 'kind', 'reaction', 'source', 'verificationStatus', 'notes'];
-  const allowedFields = ['substance', 'kind', 'reaction', 'source', 'verificationStatus', 'notes'];
+  const clinicalFields = ['substance', 'ingredientId', 'kind', 'reaction', 'source', 'verificationStatus', 'notes'];
+  const allowedFields = ['substance', 'ingredientId', 'kind', 'reaction', 'source', 'verificationStatus', 'notes'];
   if (!isCreating) {
     allowedFields.push('reason', 'version');
   }
@@ -47,6 +47,11 @@ export const validateAllergyInput = (req, res, next) => {
   if (isCreating || body.kind !== undefined) {
     if (typeof body.kind !== 'string' || !validator.isIn(body.kind, allergyKinds)) {
       return res.status(400).json({ message: 'Kind must be allergy or sensitivity' });
+    }
+  }
+  if (body.ingredientId !== undefined && body.ingredientId !== null) {
+    if (typeof body.ingredientId !== 'string' || !validator.isMongoId(body.ingredientId)) {
+      return res.status(400).json({ message: 'Ingredient ID must be a valid ID or null' });
     }
   }
   if (isCreating || body.reaction !== undefined) {

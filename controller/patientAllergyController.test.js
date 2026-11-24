@@ -16,6 +16,7 @@ import Patient from '../models/Patient.js';
 import Doctor from '../models/Doctor.js';
 import Appointment from '../models/Appointment.js';
 import PatientAllergy from '../models/PatientAllergy.js';
+import Ingredient, { catalogSource } from '../models/Ingredient.js';
 import authRoutes from '../routes/authRoutes.js';
 import patientRoutes from '../routes/patientRoutes.js';
 import appointmentRoutes from '../routes/appointmentRoutes.js';
@@ -28,6 +29,7 @@ const users = {};
 const tokens = {};
 const patients = [];
 const appointments = {};
+let ingredients;
 let databaseDirectory;
 let mongoProcess;
 let server;
@@ -85,7 +87,7 @@ before(async () => {
   ], { windowsHide: true, stdio: 'ignore' });
   await once(mongoProcess, 'spawn');
   await mongoose.connect(`mongodb://127.0.0.1:${mongoPort}/patient_allergy_tests`, { serverSelectionTimeoutMS: 15000 });
-  await Promise.all([User.init(), AuthSession.init(), Doctor.init(), Appointment.init(), PatientAllergy.init()]);
+  await Promise.all([User.init(), AuthSession.init(), Doctor.init(), Appointment.init(), PatientAllergy.init(), Ingredient.init()]);
   const app = express();
   app.use(express.json());
   app.use(handleJsonErrors);
@@ -109,6 +111,11 @@ before(async () => {
 
 beforeEach(async () => {
   await PatientAllergy.deleteMany({});
+  await Ingredient.deleteMany({});
+  ingredients = await Ingredient.create([
+    { code: 'DEMO-I-A', name: 'Fictional Component A', createdBy: users.hospital_admin._id },
+    { code: 'DEMO-I-B', name: 'Fictional Component B', createdBy: users.hospital_admin._id },
+  ]);
   await Appointment.deleteMany({});
   await Doctor.deleteMany({});
   for (const key of ['doctor', 'otherDoctor']) {
@@ -408,7 +415,7 @@ test('invalid clinical fields are rejected on create and update without modifyin
 });
 
 test('new reports cannot forge reviewed status or server-owned fields', async () => {
-  for (const fields of [{ verificationStatus: 'confirmed' }, { verificationStatus: 'refuted' }, { patient: patients[1].id }, { recordedBy: users.otherDoctor.id }, { updatedBy: users.otherDoctor.id }, { reviewedBy: users.otherDoctor.id }, { reviewedAt: new Date().toISOString() }, { history: [] }, { substanceKey: 'fake' }, { version: 100 }, { ingredientId: new mongoose.Types.ObjectId().toString() }, { appointmentId: appointments.other.id }, { $set: { verificationStatus: 'confirmed' } }]) {
+  for (const fields of [{ verificationStatus: 'confirmed' }, { verificationStatus: 'refuted' }, { patient: patients[1].id }, { recordedBy: users.otherDoctor.id }, { updatedBy: users.otherDoctor.id }, { reviewedBy: users.otherDoctor.id }, { reviewedAt: new Date().toISOString() }, { history: [] }, { substanceKey: 'fake' }, { version: 100 }, { appointmentId: appointments.other.id }, { $set: { verificationStatus: 'confirmed' } }]) {
     await request('POST', route(), 'doctor', { ...details(), ...fields }, 400);
   }
   assert.equal(await PatientAllergy.countDocuments(), 0);
@@ -499,4 +506,200 @@ test('a stale loaded document fails optimistic concurrency without losing the sa
   const current = await PatientAllergy.findById(allergy._id);
   assert.equal(current.notes, 'Fictional current note');
   assert.equal(current.history.length, 2);
+});
+
+test('unmapped reports accept omitted or null ingredient IDs and never infer a link from the name', async () => {
+  const named = await createAllergy({ ...details(), substance: ingredients[0].name });
+  const explicit = await createAllergy({ ...details(), ingredientId: null });
+  for (const allergy of [named, explicit]) {
+    assert.equal(allergy.ingredient, null);
+    assert.equal(allergy.ingredientSnapshot, null);
+    assert.equal(allergy.history[0].snapshot.ingredient, null);
+    assert.equal(allergy.history[0].snapshot.ingredientSnapshot, null);
+  }
+});
+
+test('creation persists the ingredient ID and server-owned simulated snapshot in the record and history', async () => {
+  const allergy = await createAllergy({ ...details(), ingredientId: ingredients[0].id });
+  assert.equal(allergy.ingredient, ingredients[0].id);
+  assert.deepEqual(allergy.ingredientSnapshot, { code: ingredients[0].code, name: ingredients[0].name, ...catalogSource });
+  assert.equal(allergy.verificationStatus, 'unconfirmed');
+  assert.equal(allergy.history[0].snapshot.ingredient, allergy.ingredient);
+  assert.deepEqual(allergy.history[0].snapshot.ingredientSnapshot, allergy.ingredientSnapshot);
+  const saved = await PatientAllergy.findById(allergy._id);
+  assert.equal(saved.ingredient.toString(), ingredients[0].id);
+  assert.deepEqual(saved.ingredientSnapshot.toObject(), allergy.ingredientSnapshot);
+  const list = await request('GET', route(), 'doctor', undefined, 200);
+  assert.equal(list.allergies[0].ingredient, allergy.ingredient);
+  assert.deepEqual(list.allergies[0].ingredientSnapshot, allergy.ingredientSnapshot);
+  const detail = await request('GET', route(0, allergy._id), 'doctor', undefined, 200);
+  assert.deepEqual(detail.allergy, allergy);
+});
+
+test('adding a mapping requires reason and version and resets an earlier review', async () => {
+  const allergy = await createAllergy();
+  const confirmed = await request('PATCH', route(0, allergy._id), 'doctor', change(allergy, { verificationStatus: 'confirmed' }), 200);
+  await request('PATCH', route(0, allergy._id), 'doctor', { ingredientId: ingredients[0].id, version: 1 }, 400);
+  await request('PATCH', route(0, allergy._id), 'doctor', { ingredientId: ingredients[0].id, reason: 'Fictional mapping' }, 400);
+  const result = await request('PATCH', route(0, allergy._id), 'doctor', change(confirmed.allergy, { ingredientId: ingredients[0].id }), 200);
+  assert.equal(result.allergy.ingredient, ingredients[0].id);
+  assert.equal(result.allergy.version, 2);
+  assert.equal(result.allergy.verificationStatus, 'unconfirmed');
+  assert.equal(result.allergy.reviewedBy, null);
+  assert.equal(result.allergy.reviewedAt, null);
+  assert.deepEqual(result.allergy.history.slice(0, 2), confirmed.allergy.history);
+  assert.equal(result.allergy.history[2].reason, 'Fictional correction reason');
+  assert.equal(result.allergy.history[2].actor, users.doctor.id);
+  assert.equal(result.allergy.history[2].appointment, appointments.own.id);
+});
+
+test('replacing an ingredient preserves earlier snapshots and resets a refuted review', async () => {
+  const allergy = await createAllergy({ ...details(), ingredientId: ingredients[0].id });
+  const refuted = await request('PATCH', route(0, allergy._id), 'doctor', change(allergy, { verificationStatus: 'refuted' }), 200);
+  const result = await request('PATCH', route(0, allergy._id), 'doctor', change(refuted.allergy, { ingredientId: ingredients[1].id }), 200);
+  assert.equal(result.allergy.ingredient, ingredients[1].id);
+  assert.equal(result.allergy.ingredientSnapshot.code, ingredients[1].code);
+  assert.equal(result.allergy.verificationStatus, 'unconfirmed');
+  assert.equal(result.allergy.reviewedBy, null);
+  assert.deepEqual(result.allergy.history.slice(0, 2), refuted.allergy.history);
+  assert.equal(result.allergy.history[0].snapshot.ingredient, ingredients[0].id);
+  assert.equal(result.allergy.history[2].snapshot.ingredient, ingredients[1].id);
+  assert.deepEqual(result.allergy.history[2].snapshot.ingredientSnapshot, result.allergy.ingredientSnapshot);
+});
+
+test('a doctor may explicitly review a new mapping in the same traced update', async () => {
+  const allergy = await createAllergy();
+  const result = await request('PATCH', route(0, allergy._id), 'doctor', change(allergy, { ingredientId: ingredients[0].id, verificationStatus: 'confirmed' }), 200);
+  assert.equal(result.allergy.verificationStatus, 'confirmed');
+  assert.equal(result.allergy.reviewedBy, users.doctor.id);
+  assert.ok(result.allergy.reviewedAt);
+  assert.equal(result.allergy.history[1].snapshot.ingredient, ingredients[0].id);
+  assert.equal(result.allergy.history[1].snapshot.reviewedAt, result.allergy.reviewedAt);
+  assert.equal(result.allergy.ingredientSnapshot.mode, 'simulated');
+});
+
+test('clearing a mapping removes its current snapshot but preserves its earlier history', async () => {
+  const allergy = await createAllergy({ ...details(), ingredientId: ingredients[0].id });
+  const confirmed = await request('PATCH', route(0, allergy._id), 'doctor', change(allergy, { verificationStatus: 'confirmed' }), 200);
+  const result = await request('PATCH', route(0, allergy._id), 'doctor', change(confirmed.allergy, { ingredientId: null }), 200);
+  assert.equal(result.allergy.ingredient, null);
+  assert.equal(result.allergy.ingredientSnapshot, null);
+  assert.equal(result.allergy.verificationStatus, 'unconfirmed');
+  assert.equal(result.allergy.reviewedBy, null);
+  assert.equal(result.allergy.reviewedAt, null);
+  assert.deepEqual(result.allergy.history.slice(0, 2), confirmed.allergy.history);
+  assert.equal(result.allergy.history[2].snapshot.ingredient, null);
+});
+
+test('omitted mapping and equivalent normalized names preserve the mapping and review', async () => {
+  const allergy = await createAllergy({ ...details(), ingredientId: ingredients[0].id });
+  const confirmed = await request('PATCH', route(0, allergy._id), 'doctor', change(allergy, { verificationStatus: 'confirmed' }), 200);
+  const result = await request('PATCH', route(0, allergy._id), 'doctor', change(confirmed.allergy, { notes: 'Fictional note', substance: '  Fictional   Substance A  ' }), 200);
+  assert.equal(result.allergy.ingredient, ingredients[0].id);
+  assert.deepEqual(result.allergy.ingredientSnapshot, allergy.ingredientSnapshot);
+  assert.equal(result.allergy.verificationStatus, 'confirmed');
+  assert.equal(result.allergy.reviewedAt, confirmed.allergy.reviewedAt);
+});
+
+test('renaming a substance clears an omitted mapping and accepts an explicitly chosen replacement', async () => {
+  const allergy = await createAllergy({ ...details(), ingredientId: ingredients[0].id });
+  const renamed = await request('PATCH', route(0, allergy._id), 'doctor', change(allergy, { substance: 'Fictional renamed substance' }), 200);
+  assert.equal(renamed.allergy.ingredient, null);
+  assert.equal(renamed.allergy.ingredientSnapshot, null);
+  assert.equal(renamed.allergy.history[0].snapshot.ingredient, ingredients[0].id);
+  const remapped = await request('PATCH', route(0, allergy._id), 'doctor', change(renamed.allergy, { substance: 'Fictional newly mapped substance', ingredientId: ingredients[1].id }), 200);
+  assert.equal(remapped.allergy.ingredient, ingredients[1].id);
+  const retained = await request('PATCH', route(0, allergy._id), 'doctor', change(remapped.allergy, { substance: 'Fictional final substance', ingredientId: ingredients[1].id }), 200);
+  assert.equal(retained.allergy.ingredient, ingredients[1].id);
+  assert.equal(retained.allergy.history[2].snapshot.ingredient, ingredients[1].id);
+});
+
+test('invalid ingredient ID types are rejected before any create or update is saved', async () => {
+  const allergy = await createAllergy();
+  for (const ingredientId of ['', 'bad', ' ' + ingredients[0].id, 1, true, [], {}, { $ne: null }]) {
+    await request('POST', route(), 'doctor', { ...details(), ingredientId }, 400);
+    await request('PATCH', route(0, allergy._id), 'doctor', change(allergy, { ingredientId }), 400);
+  }
+  assert.equal(await PatientAllergy.countDocuments(), 1);
+  assert.equal((await PatientAllergy.findById(allergy._id)).history.length, 1);
+});
+
+test('missing or unsupported-source ingredients return 404 without changing any allergy fields', async () => {
+  const allergy = await createAllergy({ ...details(), ingredientId: ingredients[0].id });
+  const previous = JSON.stringify(await PatientAllergy.findById(allergy._id).lean());
+  const missing = new mongoose.Types.ObjectId().toString();
+  // یوازې په جلا test DB کې نامجاز سرچینه تمثیلوو.
+  await Ingredient.collection.updateOne({ _id: ingredients[1]._id }, { $set: { mode: 'unverified', source: 'unapproved' } });
+  for (const ingredientId of [missing, ingredients[1].id]) {
+    await request('POST', route(), 'doctor', { ...details(), substance: 'Fictional new report', ingredientId }, 404);
+    await request('PATCH', route(0, allergy._id), 'doctor', change(allergy, { ingredientId, reaction: 'Uncommitted change' }), 404);
+  }
+  assert.equal(JSON.stringify(await PatientAllergy.findById(allergy._id).lean()), previous);
+  assert.equal(await PatientAllergy.countDocuments(), 1);
+});
+
+test('clients cannot forge the ingredient reference, snapshot or source metadata', async () => {
+  const allergy = await createAllergy();
+  for (const field of ['ingredient', 'ingredientSnapshot', 'mode', 'sourceVersion', 'notice', 'catalog', 'mappingStatus', 'mappedBy']) {
+    const forged = { [field]: 'forged' };
+    await request('POST', route(), 'doctor', { ...details(), ingredientId: ingredients[0].id, ...forged }, 400);
+    await request('PATCH', route(0, allergy._id), 'doctor', change(allergy, { ingredientId: ingredients[0].id, ...forged }), 400);
+  }
+  assert.equal((await PatientAllergy.findById(allergy._id)).ingredient, null);
+});
+
+test('equivalent ingredient IDs and clearing an already unmapped report are no-op updates', async () => {
+  const mapped = await createAllergy({ ...details(), ingredientId: ingredients[0].id });
+  const unmapped = await createAllergy({ ...details(), substance: 'Fictional unmapped report' });
+  await request('PATCH', route(0, mapped._id), 'doctor', change(mapped, { ingredientId: ingredients[0].id.toUpperCase() }), 400);
+  await request('PATCH', route(0, unmapped._id), 'doctor', change(unmapped, { ingredientId: null }), 400);
+  assert.equal((await PatientAllergy.findById(mapped._id)).version, 0);
+  assert.equal((await PatientAllergy.findById(unmapped._id)).history.length, 1);
+});
+
+test('mapping cannot bypass doctor role, active profile, visit or patient scope', async () => {
+  const allergy = await createAllergy();
+  for (const account of ['hospital_admin', 'hospital_pharmacist', 'external_pharmacist', 'receptionist', 'patient', 'otherDoctor', 'profilelessDoctor']) {
+    await request('POST', route(), account, { ...details(), ingredientId: ingredients[0].id }, 403);
+    await request('PATCH', route(0, allergy._id), account, change(allergy, { ingredientId: ingredients[0].id }), 403);
+  }
+  await request('PATCH', route(2, allergy._id), 'doctor', change(allergy, { ingredientId: ingredients[0].id }), 404);
+  await Doctor.updateOne({ user: users.doctor._id }, { $set: { isActive: false } });
+  await request('PATCH', route(0, allergy._id), 'doctor', change(allergy, { ingredientId: ingredients[0].id }), 403);
+  assert.equal((await PatientAllergy.findById(allergy._id)).ingredient, null);
+});
+
+test('stale mapping and concurrent remapping preserve exactly one complete update and snapshot', async () => {
+  const allergy = await createAllergy();
+  const results = await Promise.all([
+    request('PATCH', route(0, allergy._id), 'doctor', change(allergy, { ingredientId: ingredients[0].id, notes: 'Fictional A' })),
+    request('PATCH', route(0, allergy._id), 'doctor', change(allergy, { ingredientId: ingredients[1].id, notes: 'Fictional B' })),
+  ]);
+  assert.deepEqual(results.map(result => result.httpStatus).sort(), [200, 409]);
+  const winner = results.find(result => result.httpStatus === 200).allergy;
+  await request('PATCH', route(0, allergy._id), 'doctor', change(allergy, { ingredientId: null }), 409);
+  const current = await request('GET', route(0, allergy._id), 'doctor', undefined, 200);
+  assert.deepEqual(current.allergy, winner);
+  assert.equal(winner.version, 1);
+  assert.equal(winner.history.length, 2);
+  assert.equal(winner.history[1].snapshot.ingredient, winner.ingredient);
+  assert.deepEqual(winner.history[1].snapshot.ingredientSnapshot, winner.ingredientSnapshot);
+});
+
+test('legacy records read as unmapped without a database rewrite and retain old stored history after mapping', async () => {
+  const allergy = await createAllergy({ ...details(), substance: ingredients[0].name });
+  const filter = { _id: new mongoose.Types.ObjectId(allergy._id) };
+  await PatientAllergy.collection.updateOne(filter, { $unset: { ingredient: '', ingredientSnapshot: '', 'history.0.snapshot.ingredient': '', 'history.0.snapshot.ingredientSnapshot': '' } });
+  const legacy = await PatientAllergy.collection.findOne(filter);
+  const detail = await request('GET', route(0, allergy._id), 'doctor', undefined, 200);
+  assert.equal(detail.allergy.ingredient, null);
+  assert.equal(detail.allergy.ingredientSnapshot, null);
+  const listed = await request('GET', route(), 'doctor', undefined, 200);
+  assert.equal(listed.allergies[0].ingredient, null);
+  assert.deepEqual(await PatientAllergy.collection.findOne(filter), legacy);
+  const mapped = await request('PATCH', route(0, allergy._id), 'doctor', change(detail.allergy, { ingredientId: ingredients[0].id }), 200);
+  assert.equal(mapped.allergy.ingredient, ingredients[0].id);
+  const saved = await PatientAllergy.collection.findOne(filter);
+  assert.deepEqual(saved.history[0], legacy.history[0]);
+  assert.equal(saved.history[1].snapshot.ingredient.toString(), ingredients[0].id);
 });

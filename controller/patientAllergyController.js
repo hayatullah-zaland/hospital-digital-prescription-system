@@ -1,5 +1,34 @@
 import validator from 'validator';
 import PatientAllergy, { allergyKinds, allergyVerificationStatuses } from '../models/PatientAllergy.js';
+import Ingredient, { catalogSource } from '../models/Ingredient.js';
+
+// په create او update کې د جزء چک او کاپي یو ځای ساتو.
+async function setAllergyIngredient(allergy, ingredientId) {
+  if (ingredientId === undefined) return true;
+  if (ingredientId === null) {
+    allergy.ingredient = null;
+    allergy.ingredientSnapshot = null;
+    return true;
+  }
+  const ingredient = await Ingredient.findOne({
+    _id: ingredientId,
+    mode: catalogSource.mode,
+    source: catalogSource.source,
+    sourceVersion: catalogSource.sourceVersion,
+  });
+  if (!ingredient) return false;
+  if (allergy.ingredient && allergy.ingredient.equals(ingredient._id)) return true;
+  allergy.ingredient = ingredient._id;
+  allergy.ingredientSnapshot = {
+    code: ingredient.code,
+    name: ingredient.name,
+    mode: ingredient.mode,
+    source: ingredient.source,
+    sourceVersion: ingredient.sourceVersion,
+    notice: ingredient.notice,
+  };
+  return true;
+}
 
 // ثبت او سمون دواړه د خپل وخت بشپړه کاپي په تاریخچه کې زیاتوي.
 function appendAllergyHistory(allergy, action, req, reason) {
@@ -11,6 +40,8 @@ function appendAllergyHistory(allergy, action, req, reason) {
     at: new Date(),
     snapshot: {
       substance: allergy.substance,
+      ingredient: allergy.ingredient,
+      ingredientSnapshot: allergy.ingredientSnapshot,
       kind: allergy.kind,
       reaction: allergy.reaction,
       source: allergy.source,
@@ -39,6 +70,10 @@ export const createPatientAllergy = async (req, res) => {
       recordedBy: req.user._id,
       updatedBy: req.user._id,
     });
+    const ingredientAccepted = await setAllergyIngredient(allergy, req.body.ingredientId);
+    if (!ingredientAccepted) {
+      return res.status(404).json({ message: 'Ingredient not found in the simulated catalog' });
+    }
     appendAllergyHistory(allergy, 'created', req, 'Initial allergy report');
     // معلومات او تاریخچه په یوه سند او یوه save کې ثبتېږي.
     await allergy.save();
@@ -132,7 +167,16 @@ export const updatePatientAllergy = async (req, res) => {
       allergy.substance = substance.trim().replace(/\s+/g, ' ');
       if (allergy.isModified('substance')) {
         allergy.substanceKey = allergy.substance.toLowerCase();
+        if (req.body.ingredientId === undefined) {
+          // د نوي نوم لپاره پخوانی جزء په پټه نه ساتو.
+          allergy.ingredient = null;
+          allergy.ingredientSnapshot = null;
+        }
       }
+    }
+    const ingredientAccepted = await setAllergyIngredient(allergy, req.body.ingredientId);
+    if (!ingredientAccepted) {
+      return res.status(404).json({ message: 'Ingredient not found in the simulated catalog' });
     }
     if (kind !== undefined) {
       allergy.kind = kind;
@@ -148,7 +192,7 @@ export const updatePatientAllergy = async (req, res) => {
     }
     if (verificationStatus !== undefined) {
       allergy.verificationStatus = verificationStatus;
-    } else if (allergy.isModified('substance') || allergy.isModified('kind') || allergy.isModified('reaction') || allergy.isModified('source')) {
+    } else if (allergy.isModified('substance') || allergy.isModified('ingredient') || allergy.isModified('kind') || allergy.isModified('reaction') || allergy.isModified('source')) {
       // بدل شوي clinical معلومات بیا د ډاکټر جلا ارزونه غواړي.
       allergy.verificationStatus = 'unconfirmed';
     }

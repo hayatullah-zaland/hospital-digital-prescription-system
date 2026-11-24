@@ -4,9 +4,21 @@ export const allergyKinds = ['allergy', 'sensitivity'];
 export const allergySources = ['patient_reported', 'medical_record', 'clinician_observed'];
 export const allergyVerificationStatuses = ['unconfirmed', 'confirmed', 'refuted'];
 
+// د ټاکل شوي جزء نوم او سرچینه د هماغه وخت په بڼه ساتو.
+const ingredientSnapshotSchema = new mongoose.Schema({
+  code: { type: String, required: true },
+  name: { type: String, required: true },
+  mode: { type: String, enum: ['simulated'], required: true },
+  source: { type: String, required: true },
+  sourceVersion: { type: String, required: true },
+  notice: { type: String, required: true },
+}, { _id: false });
+
 // د هر بدلون پر وخت د هماغه وخت ټول معلومات په تاریخچه کې ساتو.
 const snapshotSchema = new mongoose.Schema({
   substance: { type: String, required: true },
+  ingredient: { type: mongoose.Schema.Types.ObjectId, ref: 'Ingredient', default: null },
+  ingredientSnapshot: { type: ingredientSnapshotSchema, default: null },
   kind: { type: String, enum: allergyKinds, required: true },
   reaction: { type: String, required: true },
   source: { type: String, enum: allergySources, required: true },
@@ -35,6 +47,9 @@ const patientAllergySchema = new mongoose.Schema({
   substance: { type: String, required: true, trim: true, minlength: 2, maxlength: 150 },
   // دا یوازې د تکراري نوم د مخنیوي کلۍ ده؛ د دوا ingredient mapping نه دی.
   substanceKey: { type: String, required: true, select: false },
+  // پخواني او بې‌mapping راپورونه null پاتې کېږي؛ نوم په خپله نه نښلوو.
+  ingredient: { type: mongoose.Schema.Types.ObjectId, ref: 'Ingredient', default: null },
+  ingredientSnapshot: { type: ingredientSnapshotSchema, default: null },
   kind: { type: String, enum: allergyKinds, required: true },
   reaction: { type: String, required: true, trim: true, minlength: 2, maxlength: 500 },
   source: { type: String, enum: allergySources, required: true },

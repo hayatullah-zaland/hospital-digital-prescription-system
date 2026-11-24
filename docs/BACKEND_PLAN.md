@@ -18,8 +18,8 @@
 | Doctor Management | linked profile، لېست/search/pagination، partial update، weekly availability، فعال حالت او appointment slots | د User حساب عمومي امنیت او audit لا جلا پاتې کار دی |
 | Appointments | د ۳۰ دقیقو slots، staff booking، scoped لېست، check-in، doctor start/complete، cancellation/no-show او reschedule history | CareAssignment، patient self-booking، عمومي audit او notifications |
 | Medical Records | د خپل ملاقات draft، scoped لېست، سمون، finalize او linked correction history | د نورو clinicians مجاز history، verified patient link او admin clinical audit |
-| Patient Allergies | د خپل روان ملاقات له لارې ثبت، کتنه، review، سمون او embedded history | ingredient mapping، اتومات allergy checking، portal او عمومي audit |
-| Medicine Catalog | simulated Ingredient او Medicine، ثبت/کتنه، search/filter/pagination، فعال حالت او version لرونکی سمون | معتبر knowledge provider، allergy/Rx mapping، safety checking او عمومي audit |
+| Patient Allergies | د خپل روان ملاقات له لارې ثبت، کتنه، review، manual Ingredient mapping، سمون او embedded history | اتومات allergy checking، معتبر clinical mapping/source، portal او عمومي audit |
+| Medicine Catalog | simulated Ingredient او Medicine، ثبت/کتنه، search/filter/pagination، فعال حالت، allergy ته اختیاري reference او version لرونکی سمون | معتبر knowledge provider، Rx mapping، safety checking او عمومي audit |
 | نور required modules | لا نه دي جوړ شوي | لاندې Roadmap ته مراجعه وکړئ |
 
 فرض: لومړۍ نسخه د یوه روغتون ده او څو داخلي/تایید شوي بهرني درملتونونه
@@ -86,7 +86,7 @@ flowchart LR
 | `CareAssignment` / careassignments | patient، doctor، grantedBy، startsAt، expiresAt، revokedAt، reason | د درملنې فعال او وخت‌محدود صلاحیت |
 | `Appointment` / appointments | patient، doctor، startAt، endAt، status، createdBy، isBooked، history | د حالت/وخت/actor تاریخ؛ reschedule په هماغه سند کې atomic save |
 | `MedicalRecord` / medicalrecords | patient، doctor، appointment، symptoms، diagnosis، observations، vitals، status، finalizedAt/By، correctionOf/Reason | خپل draft سمېږي؛ finalized د linked نوې draft او جلا تایید له لارې اصلاح کېږي |
-| `PatientAllergy` / patientallergies | موجود patient، substance، kind، reaction، source، verificationStatus، recordedBy/updatedBy، reviewedAt/By، version او history؛ ingredient لا پلان دی | نوی راپور unconfirmed؛ review/سمون reason غواړي؛ snapshot/actor/visit خوندي دي |
+| `PatientAllergy` / patientallergies | موجود patient، substance، اختیاري ingredient/ingredientSnapshot، kind، reaction، source، verificationStatus، recordedBy/updatedBy، reviewedAt/By، version او history | نوی راپور unconfirmed؛ manual mapping/review/سمون reason او version غواړي؛ snapshot/actor/visit خوندي دي |
 | `Ingredient` / ingredients | موجود ثابت code/name، mode، source، sourceVersion، notice او createdBy | uppercase code unique؛ یوازې simulated ثبت/کتنه، PATCH/DELETE نه لري |
 | `Medicine` / medicines | موجود code، name، strength، form، ingredients، notes، isActive، mode، source، sourceVersion، notice، createdBy/updatedBy او version | ثابت unique code؛ optimistic concurrency؛ له prescription/inventory سره نښلول لا پلان دي |
 | `KnowledgeRule` / knowledgerules | kind، ingredient IDs، providerRuleId، severity، evidence، sourceVersion، mode | معتبره سرچینه یا څرګند simulated rule |
@@ -119,6 +119,7 @@ erDiagram
     USER ||--o{ PRESCRIPTION : writes
     PRESCRIPTION ||--o{ SAFETY_CHECK : checks
     MEDICINE }o--o{ INGREDIENT : contains
+    INGREDIENT o|--o{ PATIENT_ALLERGY : manual_mapping
     INGREDIENT ||--o{ KNOWLEDGE_RULE : referenced_by
     PRESCRIPTION ||--o{ PRESCRIPTION_TRANSMISSION : sends
     PHARMACY ||--o{ PRESCRIPTION_TRANSMISSION : receives
@@ -237,12 +238,22 @@ stateDiagram-v2
 بڼې نسخه ده، clinical provider release نه دی. بریالي ځوابونه، حتی تش لېست،
 `catalog` metadata لري. دا د manual academic catalog بنسټ دی؛ strength
 ښودنیز متن دی، د dose د محاسبې معلومات نه دي. تفصیل په `MEDICINE_API.md` کې دی.
-له پخوانیو نسخو او allergy متنونو سره mapping، بشپړ catalog audit او clinical
-knowledge integration لا پلان دي؛ عمومي AuditLog یې د تکمیل شرط پاتې دی.
+له پخوانیو نسخو سره mapping، بشپړ catalog audit او clinical knowledge
+integration لا پلان دي؛ عمومي AuditLog یې د تکمیل شرط پاتې دی.
+
+د ۲۰۲۶-۱۱-۲۴ allergy manual mapping اوس د موجود POST/PATCH له لارې
+اختیاري `ingredientId` مني. `ingredient` د Ingredient ID او
+`ingredientSnapshot` د code/name/mode/source/sourceVersion/notice د هماغه
+وخت کاپي ساتي؛ history دواړه لري. یوازې موجود academic simulated catalog
+جزء منل کېږي. Client metadata نه ټاکي. `null` اړیکه لرې کوي؛ omission یې
+ساتي، خو د substance د بدلولو پر مهال omission پخوانی mapping پاکوي.
+نوی نوم څرګند انتخاب غواړي. پخواني records په خپله نه map کېږي؛ read یې
+په DB کې نه بدلوي. دا د doctor manual انتخاب دی، معتبر اتومات clinical
+matching یا safety نتیجه نه ده.
 
 د Patient Allergies ثبت/review موجود دی؛ دا اتومات check نه دی.
 Create تل unconfirmed دی. PATCH reason او تازه version غواړي، confirmed یا
-refuted ارزونه له reviewer/time سره ساتي. د clinical محتوا بدلون پخوانۍ
+refuted ارزونه له reviewer/time سره ساتي. د clinical محتوا یا ingredient بدلون پخوانۍ
 ارزونه unconfirmed کوي، مګر که doctor په څرګنده نوې ارزونه هم ولېږي.
 هر snapshot، actor او appointment په هماغه سند کې پاتې کېږي. Refuted ریکارډ
 نه حذفېږي او په default لېست کې ښکاري. تفصیل په `PATIENT_ALLERGY_API.md` کې دی.
@@ -315,10 +326,10 @@ Base: `/api`. لاندې `{id}` د حقیقي ID ځای دی. Role د پورته
 | PATCH | `/medical-records/{id}` | فعال لیکونکی؛ یوازې draft |
 | POST | `/medical-records/{id}/finalize` | فعال لیکونکی؛ وروستی تایید او actor/time |
 | POST | `/medical-records/{id}/corrections` | فعال لیکونکی؛ finalized ته نوې linked draft او reason |
-| POST | `/patients/{id}/allergies` | فعال doctor؛ خپل in_progress ملاقات، نوی unconfirmed راپور |
+| POST | `/patients/{id}/allergies` | فعال doctor؛ خپل in_progress ملاقات، نوی unconfirmed راپور او اختیاري ingredientId |
 | GET | `/patients/{id}/allergies` | فعال doctor؛ د خپل روان ملاقات ناروغ، filters/pagination |
 | GET | `/patients/{id}/allergies/{allergyId}` | هماغه relationship؛ بشپړ allergy او history |
-| PATCH | `/patients/{id}/allergies/{allergyId}` | هماغه relationship؛ تازه version، reason او trace |
+| PATCH | `/patients/{id}/allergies/{allergyId}` | هماغه relationship؛ manual mapping/clear، review یا سمون، تازه version، reason او trace |
 
 موجود لېستونه pagination لري؛ patient لټون `search` او prescription filter
 `patientId` دی. د اوسني `/auth/users` قرارداد ساتو؛ نوې `/users` لارې مدیریت دی.
@@ -445,7 +456,7 @@ Export د response له لارې ورکول کېږي؛ نوی filesystem فول�
 | ۰ | همدا architecture، collections، permissions، API او roadmap | موجود او پلان جلا؛ د ټولو modules پوښښ |
 | ۱ — یوه برخه جوړه | Doctor profile او خپل login session/logout شته؛ refresh، User مدیریت او audit پاتې دي | profile، permissions، inactive prescribing، session expiry او logout ازمویل شوي؛ phase لا نه دی بشپړ |
 | ۲ — یوه برخه جوړه | Appointments، slots، check-in، cancel/no-show او reschedule history شته؛ CareAssignment او patient booking پاتې دي | duplicate/concurrent booking/reschedule `409` او doctor scope ازمویل شوي؛ phase لا بشپړ نه دی |
-| ۳ — یوه برخه جوړه | خپل Medical Records او د روان ملاقات allergies/review/history شته؛ ګډ medical history او verified patient link پاتې دي | ownership، visit access، snapshots، stale version او concurrent writes ازمویل شوي |
+| ۳ — یوه برخه جوړه | خپل Medical Records او د روان ملاقات allergies/review/manual ingredient mapping/history شته؛ ګډ medical history او verified patient link پاتې دي | ownership، visit access، snapshots، stale version، legacy unmapped records او concurrent writes ازمویل شوي |
 | ۴ — یوه برخه جوړه | simulated Medicine Catalog او ingredients شته؛ معتبر knowledge source integration پاتې دی | source/version/محدودیت مستند؛ clinical coverage او provider لا نه شته |
 | ۵ | Drug Interaction او Allergy Checking | synthetic fixtures او unknown/provider failure سمې پایلې ورکوي |
 | ۶ | Prescription draft/check/sign، correction او cancellation | signed content immutable؛ stale check نه sign کېږي؛ trace/audit ساتل کېږي |
@@ -475,8 +486,8 @@ CareAssignment د کاروونکي په غوښتنه فعلاً ځنډېدلی �
 
 د Patient Allergies لومړۍ برخه په `PATIENT_ALLERGY_API.md` کې ده. نوی راپور
 unconfirmed دی؛ clinical review اتومات نه دی. د نوم/نوع duplicate index او
-version خوندي history ساتي. Ingredient catalog اوس شته؛ allergy mapping،
-معتبر knowledge integration او اتومات safety پړاوونه پاتې دي.
+version خوندي history ساتي. Ingredient catalog او اختیاري manual allergy
+mapping اوس شته؛ معتبر knowledge integration او اتومات safety پړاوونه پاتې دي.
 
 د Medicine Catalog لومړۍ برخه په `MEDICINE_API.md` کې مستنده ده. ۷ endpoints،
 محدود roles، duplicate code conflict او version خوندي medicine update لري.
@@ -498,6 +509,9 @@ coverage لا پاتې دی. نوي test فایلونه په همدې موجود
 بشپړ suite د ګډ auth/middleware پراخو بدلونونو او مهمو milestones لپاره دی؛
 د اسنادو بدلون بریالۍ ازموینې بیا چلولو ته اړتیا نه لري. د ۲۰۲۶-۱۱-۲۳ catalog
 focused suite کې ۲۷ tests تېر شول؛ دا د ټولو پخوانیو suites د بیا چلولو ادعا نه ده.
+د ۲۰۲۶-۱۱-۲۴ mapping بدلون لپاره allergies او catalog suites یوځای وچلېدل:
+۵۱ allergy او ۲۷ catalog، ټول ۷۸ بریالي، صفر ناکام. د نورو modules suites
+په دې پړاو کې بیا نه دي چلول شوي.
 
 ازموینې مشخصه جلا test DB او خیالي fixtures کاروي؛ عادي DB نه پاکوي.
 د هر پړاو checks باید دا ولري:

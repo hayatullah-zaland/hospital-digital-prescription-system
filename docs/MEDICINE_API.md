@@ -188,3 +188,7 @@ node --test controller/medicineController.test.js
 معتبر clinical Allergy Checking او Drug Interaction Checking،
 له structured prescription سره نښلول، signed snapshots، عمومي AuditLog،
 pharmacy approval او inventory. اوسنی فهرست هېڅ دوا «خوندي» نه اعلانوي.
+
+د موجود فهرست د اجزاوو لپاره جلا simulated interaction rules او د روان
+ملاقات preview اوس په [INTERACTION_API.md](INTERACTION_API.md) کې دي؛ دا
+د پورته معتبر clinical checking بدیل نه دی.

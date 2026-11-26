@@ -2,6 +2,7 @@ import express from 'express';
 import { createPatient, getPatients, getPatientById, updatePatient } from '../controller/patientController.js';
 import { protect, allowRoles } from '../middleware/authMiddleware.js';
 import patientAllergyRoutes from './patientAllergyRoutes.js';
+import patientInteractionRoutes from './patientInteractionRoutes.js';
 
 const router = express.Router();
 
@@ -12,6 +13,7 @@ router.use((req, res, next) => {
 router.use(protect);
 
 router.use('/:patientId/allergies', patientAllergyRoutes);
+router.use('/:patientId/interactions', patientInteractionRoutes);
 
 router.post('/', allowRoles('hospital_admin', 'receptionist'), createPatient);
 router.get('/', allowRoles('hospital_admin', 'receptionist', 'doctor'), getPatients);

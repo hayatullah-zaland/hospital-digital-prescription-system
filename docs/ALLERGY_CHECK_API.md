@@ -165,8 +165,9 @@ mappings ولري، پایله `clear` ده. که یو راپور بې‌mapping
 
 ټول ځوابونه `Cache-Control: no-store` لري. له هر اړوند سمون وروسته بیا
 preview وغواړئ. ځواب د لوستل شوو records نسخه ښيي، خو د څو collections
-atomic snapshot یا د نسخې د لاسلیک اجازه نه ده. دا پړاو severity، د دواوو
-تداخل، dosing، signing، transmission او د معتبر provider checking نه بشپړوي.
+atomic snapshot یا د نسخې د لاسلیک اجازه نه ده. دا پړاو severity، dosing،
+signing، transmission او د معتبر provider checking نه بشپړوي. جلا simulated
+interaction preview اوس په [INTERACTION_API.md](INTERACTION_API.md) کې مستند دی.
 
 ```powershell
 node --test controller/patientAllergyController.test.js controller/medicineController.test.js

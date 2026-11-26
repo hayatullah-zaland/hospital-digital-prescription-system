@@ -18,9 +18,11 @@ import Appointment from '../models/Appointment.js';
 import PatientAllergy from '../models/PatientAllergy.js';
 import Ingredient, { catalogSource } from '../models/Ingredient.js';
 import Medicine from '../models/Medicine.js';
+import KnowledgeRule, { interactionSource } from '../models/KnowledgeRule.js';
 import authRoutes from '../routes/authRoutes.js';
 import patientRoutes from '../routes/patientRoutes.js';
 import appointmentRoutes from '../routes/appointmentRoutes.js';
+import interactionRuleRoutes from '../routes/interactionRuleRoutes.js';
 import { handleJsonErrors } from '../middleware/jsonErrorHandler.js';
 
 // دا ازموینې خپل موقتي MongoDB لري؛ د پروژې .env او عادي DB نه کاروي.
@@ -73,6 +75,7 @@ async function checkAllEndpoints(account, expected, patientIndex = 0) {
   await request('GET', route(patientIndex, id), account, undefined, expected);
   await request('PATCH', route(patientIndex, id), account, change({ version: 0 }, { notes: 'Fictional update' }), expected);
   await request('POST', route(patientIndex) + '/check', account, { medicineIds: [id] }, expected);
+  await request('POST', interactionRoute(patientIndex), account, { medicineIds: [id] }, expected);
 }
 
 async function createCheckMedicine(ingredientIds = [ingredients[0]._id], code = 'DEMO-CHECK-A') {
@@ -82,6 +85,23 @@ async function createCheckMedicine(ingredientIds = [ingredients[0]._id], code = 
 async function checkAllergies(medicineIds, patientIndex = 0) {
   const result = await request('POST', route(patientIndex) + '/check', 'doctor', { medicineIds }, 200);
   assert.deepEqual(result.catalog, catalogSource);
+  assert.equal(result.check.mode, 'simulated');
+  return result.check;
+}
+
+function interactionRoute(patientIndex = 0) {
+  return `/api/patients/${patients[patientIndex].id}/interactions/check`;
+}
+
+async function createRule(outcome = 'warning', ingredientIds = [ingredients[0].id, ingredients[1].id], account = 'hospital_admin') {
+  const result = await request('POST', '/api/interaction-rules', account, { ingredientIds, outcome }, 201);
+  assert.deepEqual(result.knowledge, interactionSource);
+  return result.rule;
+}
+
+async function checkInteractions(medicineIds) {
+  const result = await request('POST', interactionRoute(), 'doctor', { medicineIds }, 200);
+  assert.deepEqual(result.knowledge, interactionSource);
   assert.equal(result.check.mode, 'simulated');
   return result.check;
 }
@@ -100,13 +120,14 @@ before(async () => {
   ], { windowsHide: true, stdio: 'ignore' });
   await once(mongoProcess, 'spawn');
   await mongoose.connect(`mongodb://127.0.0.1:${mongoPort}/patient_allergy_tests`, { serverSelectionTimeoutMS: 15000 });
-  await Promise.all([User.init(), AuthSession.init(), Doctor.init(), Appointment.init(), PatientAllergy.init(), Ingredient.init(), Medicine.init()]);
+  await Promise.all([User.init(), AuthSession.init(), Doctor.init(), Appointment.init(), PatientAllergy.init(), Ingredient.init(), Medicine.init(), KnowledgeRule.init()]);
   const app = express();
   app.use(express.json());
   app.use(handleJsonErrors);
   app.use('/api/auth', authRoutes);
   app.use('/api/patients', patientRoutes);
   app.use('/api/appointments', appointmentRoutes);
+  app.use('/api/interaction-rules', interactionRuleRoutes);
   server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -123,6 +144,7 @@ before(async () => {
 }, { timeout: 30000 });
 
 beforeEach(async () => {
+  await KnowledgeRule.deleteMany({});
   await PatientAllergy.deleteMany({});
   await Medicine.deleteMany({});
   await Ingredient.deleteMany({});
@@ -964,4 +986,281 @@ test('allergy preview validates patient IDs before looking up medicines', async 
   for (const [patientId, expected] of [['bad', 400], [new mongoose.Types.ObjectId().toString(), 404]]) {
     await request('POST', `/api/patients/${patientId}/allergies/check`, 'doctor', { medicineIds: [medicine.id] }, expected);
   }
+});
+
+// د تعامل ازموینې همدا جلا DB او د روان ملاقات موجود fixtures کاروي.
+test('interaction rules persist canonical pairs and server-owned simulated provenance', async () => {
+  const ids = [ingredients[1].id.toUpperCase(), ingredients[0].id];
+  const rule = await createRule('warning', ids, 'hospital_pharmacist');
+  assert.deepEqual(rule.ingredients, [ingredients[0].id, ingredients[1].id].sort());
+  assert.equal(rule.pairKey, rule.ingredients.join(':'));
+  assert.equal(rule.kind, 'drug_interaction');
+  assert.equal(rule.createdBy, users.hospital_pharmacist.id);
+  assert.equal(rule.mode, 'simulated');
+  assert.equal(rule.notice, interactionSource.notice);
+  assert.equal(rule.severity, undefined);
+  assert.equal(rule.evidence, undefined);
+  const saved = await KnowledgeRule.findById(rule._id).lean();
+  assert.equal(saved.sourceVersion, interactionSource.sourceVersion);
+});
+
+test('reversed or concurrent ingredient pairs cannot create conflicting rules', async () => {
+  const body = { ingredientIds: [ingredients[0].id, ingredients[1].id], outcome: 'warning' };
+  const results = await Promise.all([
+    request('POST', '/api/interaction-rules', 'hospital_admin', body),
+    request('POST', '/api/interaction-rules', 'hospital_pharmacist', { ...body, ingredientIds: [...body.ingredientIds].reverse(), outcome: 'no_demo_interaction' }),
+  ]);
+  assert.deepEqual(results.map(result => result.httpStatus).sort(), [201, 409]);
+  assert.equal(await KnowledgeRule.countDocuments(), 1);
+  await request('POST', '/api/interaction-rules', 'hospital_admin', body, 409);
+});
+
+test('rule management enforces role permissions and authenticated reads', async () => {
+  const rule = await createRule();
+  const body = { ingredientIds: rule.ingredients, outcome: 'warning' };
+  for (const account of [null, 'invalid-token', 'receptionist', 'patient', 'external_pharmacist']) {
+    const expected = !account || account === 'invalid-token' ? 401 : 403;
+    await request('POST', '/api/interaction-rules', account, body, expected);
+    await request('GET', '/api/interaction-rules', account, undefined, expected);
+    await request('GET', '/api/interaction-rules/' + rule._id, account, undefined, expected);
+  }
+  await request('POST', '/api/interaction-rules', 'doctor', body, 403);
+  for (const account of ['hospital_admin', 'hospital_pharmacist', 'doctor']) {
+    const result = await request('GET', '/api/interaction-rules/' + rule._id, account, undefined, 200);
+    assert.equal(result.rule._id, rule._id);
+    assert.deepEqual(result.knowledge, interactionSource);
+  }
+});
+
+test('expired and revoked sessions cannot manage interaction rules', async () => {
+  const result = await request('POST', '/api/auth/signin', null, { email: users.hospital_admin.email, password }, 200);
+  const decoded = jwt.decode(result.token);
+  const expired = jwt.sign({ id: users.hospital_admin.id, sid: decoded.sid }, process.env.JWT_SECRET, { algorithm: 'HS256', expiresIn: -1 });
+  await request('GET', '/api/interaction-rules', expired, undefined, 401);
+  await request('POST', '/api/auth/logout', result.token, undefined, 200);
+  await request('POST', '/api/interaction-rules', result.token, { ingredientIds: [ingredients[0].id, ingredients[1].id], outcome: 'warning' }, 401);
+});
+
+test('invalid rule bodies and forged clinical provenance never create rules', async () => {
+  const body = { ingredientIds: [ingredients[0].id, ingredients[1].id], outcome: 'warning' };
+  for (const invalid of [undefined, null, [], {}, 'text', { ...body, ingredientIds: [] }, { ...body, ingredientIds: [ingredients[0].id] }, { ...body, ingredientIds: [ingredients[0].id, ingredients[0].id.toUpperCase()] }, { ...body, ingredientIds: [null, ingredients[1].id] }, { ...body, ingredientIds: ['bad', ingredients[1].id] }, { ...body, outcome: 'safe' }, { ...body, outcome: null }]) {
+    await request('POST', '/api/interaction-rules', 'hospital_admin', invalid, 400);
+  }
+  for (const field of ['createdBy', 'kind', 'ingredients', 'pairKey', 'mode', 'source', 'sourceVersion', 'notice', 'severity', 'evidence', 'message']) {
+    await request('POST', '/api/interaction-rules', 'hospital_admin', { ...body, [field]: 'forged' }, 400);
+  }
+  await request('POST', '/api/interaction-rules?outcome=warning', 'hospital_admin', body, 400);
+  assert.equal(await KnowledgeRule.countDocuments(), 0);
+});
+
+test('rule creation requires existing ingredients from the current simulated source', async () => {
+  const body = { ingredientIds: [ingredients[0].id, new mongoose.Types.ObjectId().toString()], outcome: 'warning' };
+  await request('POST', '/api/interaction-rules', 'hospital_admin', body, 404);
+  await Ingredient.collection.updateOne({ _id: ingredients[1]._id }, { $set: { sourceVersion: 'unsupported' } });
+  body.ingredientIds[1] = ingredients[1].id;
+  await request('POST', '/api/interaction-rules', 'hospital_admin', body, 404);
+  assert.equal(await KnowledgeRule.countDocuments(), 0);
+});
+
+test('rule lists paginate and filter by an ingredient without changing stored rules', async () => {
+  const created = [];
+  for (let index = 0; index < 12; index++) {
+    const extra = await Ingredient.create({ code: 'DEMO-RULE-' + index, name: 'Fictional rule component ' + index, createdBy: users.hospital_admin._id });
+    created.push(await createRule('no_demo_interaction', [ingredients[0].id, extra.id]));
+  }
+  await createRule('warning', [ingredients[0].id, ingredients[1].id]);
+  let result = await request('GET', '/api/interaction-rules', 'doctor', undefined, 200);
+  assert.equal(result.rules.length, 10);
+  assert.deepEqual(result.pagination, { page: 1, limit: 10, total: 13, totalPages: 2 });
+  result = await request('GET', '/api/interaction-rules?page=2&limit=10', 'doctor', undefined, 200);
+  assert.equal(result.rules.length, 3);
+  result = await request('GET', '/api/interaction-rules?ingredientId=' + ingredients[1].id, 'doctor', undefined, 200);
+  assert.equal(result.rules.length, 1);
+  await KnowledgeRule.collection.updateOne({ _id: new mongoose.Types.ObjectId(created[0]._id) }, { $set: { mode: 'unsupported' } });
+  result = await request('GET', '/api/interaction-rules', 'doctor', undefined, 200);
+  assert.equal(result.pagination.total, 12);
+  await request('GET', '/api/interaction-rules/' + created[0]._id, 'doctor', undefined, 404);
+});
+
+test('rule queries reject injection, invalid IDs and excessive pagination', async () => {
+  for (const query of ['?page=0', '?page=1.5', '?page=9007199254740991&limit=50', '?limit=51', '?limit=0', '?page[x]=1', '?ingredientId=bad', '?ingredientId[x]=1', '?source=forged', '?page=1&page=2']) {
+    await request('GET', '/api/interaction-rules' + query, 'doctor', undefined, 400);
+  }
+  await request('GET', '/api/interaction-rules/bad', 'doctor', undefined, 400);
+  await request('GET', '/api/interaction-rules/' + new mongoose.Types.ObjectId(), 'doctor', undefined, 404);
+});
+
+test('interaction preview warns on exact ingredient IDs and returns doctor visit evidence', async () => {
+  const rule = await createRule();
+  const first = await createCheckMedicine();
+  const second = await createCheckMedicine([ingredients[1]._id], 'DEMO-CHECK-B');
+  const check = await checkInteractions([second.id.toUpperCase(), first.id]);
+  assert.equal(check.status, 'warning');
+  assert.equal(check.type, 'interaction_preview');
+  assert.equal(check.patientId, patients[0].id);
+  assert.equal(check.appointmentId, appointments.own.id);
+  assert.equal(check.checkedBy, users.doctor.id);
+  assert.ok(Number.isFinite(Date.parse(check.checkedAt)));
+  assert.equal(check.coverage.complete, true);
+  assert.equal(check.coverage.pairCount, 1);
+  assert.equal(check.findings.length, 1);
+  assert.equal(check.findings[0].ruleId, rule._id);
+  assert.deepEqual(check.findings[0].medicineIds.sort(), [first.id, second.id].sort());
+  assert.deepEqual(check.rulesUsed, [{ ruleId: rule._id, ingredientIds: rule.ingredients, outcome: 'warning' }]);
+  assert.equal(check.medicines[0].version, 0);
+});
+
+test('missing rules and a single distinct ingredient return unknown rather than safe', async () => {
+  const compound = await createCheckMedicine([ingredients[0]._id, ingredients[1]._id]);
+  let check = await checkInteractions([compound.id]);
+  assert.equal(check.status, 'unknown');
+  assert.equal(check.coverage.missingPairCount, 1);
+  assert.deepEqual(check.coverage.issues, [{ code: 'uncovered_ingredient_pairs', count: 1 }]);
+  await Medicine.updateOne({ _id: compound._id }, { $set: { ingredients: [ingredients[0]._id] } });
+  check = await checkInteractions([compound.id]);
+  assert.equal(check.status, 'unknown');
+  assert.equal(check.coverage.issues[0].code, 'no_distinct_ingredient_pair');
+});
+
+test('explicit negative demo rules allow only a limited simulated clear result', async () => {
+  await createRule('no_demo_interaction');
+  const compound = await createCheckMedicine([ingredients[0]._id, ingredients[1]._id]);
+  const check = await checkInteractions([compound.id]);
+  assert.equal(check.status, 'clear');
+  assert.equal(check.coverage.complete, true);
+  assert.equal(check.coverage.coveredPairCount, 1);
+  assert.deepEqual(check.findings, []);
+  assert.equal(check.rulesUsed[0].outcome, 'no_demo_interaction');
+});
+
+test('known warnings remain visible alongside uncovered pairs and duplicate ingredients are deduplicated', async () => {
+  await createRule();
+  const extra = await Ingredient.create({ code: 'DEMO-I-C', name: 'Fictional Component C', createdBy: users.hospital_admin._id });
+  const compound = await createCheckMedicine([ingredients[0]._id, ingredients[1]._id, extra._id]);
+  await Medicine.collection.updateOne({ _id: compound._id }, { $push: { ingredients: ingredients[0]._id } });
+  const repeated = await createCheckMedicine([ingredients[1]._id], 'DEMO-CHECK-B');
+  const check = await checkInteractions([compound.id, repeated.id]);
+  assert.equal(check.status, 'warning');
+  assert.equal(check.coverage.complete, false);
+  assert.equal(check.coverage.ingredientCount, 3);
+  assert.equal(check.coverage.pairCount, 3);
+  assert.equal(check.coverage.missingPairCount, 2);
+  assert.equal(check.findings.length, 1);
+  assert.equal(check.findings[0].medicineIds.length, 2);
+});
+
+test('preview checks all rules beyond the ordinary list page', async () => {
+  const all = [ingredients[0], ingredients[1]];
+  for (let index = 2; index < 6; index++) {
+    all.push(await Ingredient.create({ code: 'DEMO-PAIR-' + index, name: 'Fictional pair ' + index, createdBy: users.hospital_admin._id }));
+  }
+  for (let first = 0; first < all.length; first++) {
+    for (let second = first + 1; second < all.length; second++) {
+      await createRule('no_demo_interaction', [all[first].id, all[second].id]);
+    }
+  }
+  const compound = await createCheckMedicine(all.map(ingredient => ingredient._id));
+  const check = await checkInteractions([compound.id]);
+  assert.equal(check.status, 'clear');
+  assert.equal(check.coverage.coveredPairCount, 15);
+});
+
+test('interaction preview rejects missing and inactive medicines without partial results', async () => {
+  const medicine = await createCheckMedicine();
+  await request('POST', interactionRoute(), 'doctor', { medicineIds: [medicine.id, new mongoose.Types.ObjectId().toString()] }, 404);
+  await Medicine.updateOne({ _id: medicine._id }, { $set: { isActive: false } });
+  await request('POST', interactionRoute(), 'doctor', { medicineIds: [medicine.id] }, 404);
+});
+
+test('interaction preview validates medicine IDs and refuses client supplied results or patient scope', async () => {
+  const medicine = await createCheckMedicine();
+  for (const body of [undefined, null, [], {}, { medicineIds: [] }, { medicineIds: 'bad' }, { medicineIds: [null] }, { medicineIds: ['bad'] }, { medicineIds: [medicine.id, medicine.id.toUpperCase()] }, { medicineIds: Array(21).fill(medicine.id) }, { medicineIds: [medicine.id], status: 'clear' }, { medicineIds: [medicine.id], patientId: patients[1].id }, { medicineIds: [medicine.id], rules: [] }]) {
+    await request('POST', interactionRoute(), 'doctor', body, 400);
+  }
+  await request('POST', interactionRoute() + '?status=clear', 'doctor', { medicineIds: [medicine.id] }, 400);
+  for (const [id, expected] of [['bad', 400], [new mongoose.Types.ObjectId().toString(), 404]]) {
+    await request('POST', `/api/patients/${id}/interactions/check`, 'doctor', { medicineIds: [medicine.id] }, expected);
+  }
+  await request('POST', interactionRoute(1), 'doctor', { medicineIds: [medicine.id] }, 403);
+});
+
+test('stale or malformed rules cannot produce a clear interaction result', async () => {
+  const rule = await createRule('no_demo_interaction');
+  const medicine = await createCheckMedicine([ingredients[0]._id, ingredients[1]._id]);
+  const original = await KnowledgeRule.findById(rule._id).lean();
+  for (const fields of [{ sourceVersion: 'old' }, { source: 'unsupported' }, { mode: 'validated' }, { kind: 'unsupported' }, { outcome: 'safe' }, { ingredients: [] }, { ingredients: [ingredients[1]._id, ingredients[0]._id] }, { ingredients: [null, ingredients[1]._id] }]) {
+    await KnowledgeRule.collection.replaceOne({ _id: original._id }, { ...original, ...fields });
+    const check = await checkInteractions([medicine.id]);
+    assert.equal(check.status, 'unknown');
+    assert.equal(check.coverage.missingPairCount, 1);
+    assert.equal(check.rulesUsed.length, 0);
+  }
+});
+
+test('unsupported or missing catalog data leaves interaction coverage incomplete', async () => {
+  await createRule('no_demo_interaction');
+  const medicine = await createCheckMedicine([ingredients[0]._id, ingredients[1]._id]);
+  await Medicine.collection.updateOne({ _id: medicine._id }, { $set: { sourceVersion: 'old' } });
+  assert.equal((await checkInteractions([medicine.id])).status, 'unknown');
+  await Medicine.collection.updateOne({ _id: medicine._id }, { $set: { sourceVersion: catalogSource.sourceVersion, ingredients: [] } });
+  let check = await checkInteractions([medicine.id]);
+  assert.equal(check.status, 'unknown');
+  assert.equal(check.coverage.issues[0].code, 'missing_medicine_ingredients');
+  await Medicine.collection.updateOne({ _id: medicine._id }, { $set: { ingredients: [ingredients[0]._id, ingredients[1]._id] } });
+  await Ingredient.collection.updateOne({ _id: ingredients[1]._id }, { $set: { sourceVersion: 'old' } });
+  assert.equal((await checkInteractions([medicine.id])).status, 'unknown');
+  await Ingredient.deleteOne({ _id: ingredients[1]._id });
+  check = await checkInteractions([medicine.id]);
+  assert.equal(check.status, 'unknown');
+  assert.equal(check.coverage.issues[0].code, 'unavailable_ingredient');
+});
+
+test('interaction preview bounds ingredient pairs before querying rules', async () => {
+  const ids = [];
+  for (let index = 0; index < 41; index++) ids.push(new mongoose.Types.ObjectId());
+  const medicines = [];
+  for (let index = 0; index < ids.length; index += 10) {
+    medicines.push(await createCheckMedicine(ids.slice(index, index + 10), 'DEMO-LIMIT-' + index));
+  }
+  await request('POST', interactionRoute(), 'doctor', { medicineIds: medicines.map(medicine => medicine.id) }, 400);
+});
+
+test('interaction preview is read only and a later request uses current medicine content', async () => {
+  await createRule();
+  const medicine = await createCheckMedicine([ingredients[0]._id, ingredients[1]._id]);
+  await createAllergy();
+  const originalRules = await KnowledgeRule.find().lean();
+  const originalAllergies = await PatientAllergy.find().lean();
+  const originalMedicines = await Medicine.find().lean();
+  assert.equal((await checkInteractions([medicine.id])).status, 'warning');
+  assert.deepEqual(await KnowledgeRule.find().lean(), originalRules);
+  assert.deepEqual(await PatientAllergy.find().lean(), originalAllergies);
+  assert.deepEqual(await Medicine.find().lean(), originalMedicines);
+  await Medicine.updateOne({ _id: medicine._id }, { $set: { ingredients: [ingredients[0]._id] }, $inc: { version: 1 } });
+  const check = await checkInteractions([medicine.id]);
+  assert.equal(check.status, 'unknown');
+  assert.equal(check.medicines[0].version, 1);
+});
+
+test('interaction database failures return an error without a clear check or internal details', async context => {
+  const medicine = await createCheckMedicine([ingredients[0]._id, ingredients[1]._id]);
+  context.mock.method(KnowledgeRule, 'find', () => { throw new Error('private database detail'); });
+  const result = await request('POST', interactionRoute(), 'doctor', { medicineIds: [medicine.id] }, 500);
+  assert.equal(result.check, undefined);
+  assert.equal(JSON.stringify(result).includes('private database detail'), false);
+});
+
+test('interaction rules have no overwrite or delete API and immutable model fields preserve evidence', async () => {
+  const rule = await createRule();
+  for (const method of ['PATCH', 'DELETE']) {
+    const response = await fetch(baseUrl + '/api/interaction-rules/' + rule._id, { method, headers: { Authorization: 'Bearer ' + tokens.hospital_admin, 'Content-Type': 'application/json' }, body: JSON.stringify({ outcome: 'no_demo_interaction' }) });
+    assert.equal(response.status, 404);
+  }
+  const document = await KnowledgeRule.findById(rule._id);
+  document.outcome = 'no_demo_interaction';
+  document.createdBy = users.doctor._id;
+  await document.save();
+  const saved = await KnowledgeRule.findById(rule._id).lean();
+  assert.equal(saved.outcome, 'warning');
+  assert.equal(saved.createdBy.toString(), users.hospital_admin.id);
 });

@@ -32,6 +32,9 @@ Doctor prescription creation and viewing are documented in
 د فعالو دواوو له اجزاوو سره د حساسیت simulated پرتله او Postman ازموینه:
 [docs/ALLERGY_CHECK_API.md](docs/ALLERGY_CHECK_API.md).
 
+د دواوو ترمنځ د تعامل خیالي قواعد، د روان ملاقات preview او Postman ازموینه:
+[docs/INTERACTION_API.md](docs/INTERACTION_API.md).
+
 د دواوو ازمایښتي فهرست، اجزا، اجازې او Postman ازموینه:
 [docs/MEDICINE_API.md](docs/MEDICINE_API.md).
 
@@ -66,6 +69,9 @@ server.js → routes → middleware → controller → models
 - `models/Ingredient.js`، `models/Medicine.js` او `controller/medicineController.js`:
   د دواوو simulated فهرست، ثابت اجزا، لټون او version لرونکی سمون.
 - `middleware/medicineValidation.js`: د دواوو/اجزاوو input او query validation.
+- `models/KnowledgeRule.js` او `controller/interactionController.js`: د اجزاوو
+  ثابت خیالي قواعد او د خپل روان ملاقات simulated interaction preview.
+- `middleware/interactionValidation.js`: د قواعدو input او query validation.
 - `middleware/jsonErrorHandler.js`: ناسم JSON ته ساده JSON ځواب.
 
 د اوسني login logout او session revocation جوړ دي. Refresh-token flow،
@@ -94,8 +100,16 @@ suites بیا نه دي چلول شوي. د هرې برخې اړوند tests چ�
 اوس د `POST /api/patients/:patientId/allergies/check` preview شته. د همدې ورځې
 وروستی focused run ۹۹ بریالۍ ازموینې لري: ۷۲ allergies/mapping/preview او ۲۷ catalog.
 `clear` یوازې په محدودې simulated ID پرتله کې match نه موندل دي؛ د دوا د
-واقعي خوندي والي یا د نسخې د sign کولو اجازه نه ده. معتبر provider، Drug
-Interaction Checking او له prescription revision سره ثابت check لا پاتې دي.
+واقعي خوندي والي یا د نسخې د sign کولو اجازه نه ده. معتبر provider او له
+prescription revision سره ثابت check لا پاتې دي.
+
+د ۲۰۲۶-۱۱-۲۶ simulated Drug Interaction برخه هم شته: `/api/interaction-rules`
+د ثابتو خیالي قواعدو ثبت/کتنه کوي؛ `/api/patients/:patientId/interactions/check`
+د خپل روان ملاقات doctor ته warning/unknown/محدود clear ورکوي. بې‌قاعدې جوړه
+unknown ده؛ no_demo_interaction یوازې د خیالي مثال څرګند منفي قاعده ده.
+دا معتبر clinical checking نه دی. همدغه دوه focused suites ټولې ۱۲۰ ازموینې
+بریالۍ تېرې کړې: ۹۳ allergy/mapping/previews/interaction او ۲۷ catalog؛
+۲۱ نوې interaction cases شاملې دي. د نورو modules suites بیا نه دي چلول شوي.
 
 | Method | API | اجازه |
 | --- | --- | --- |

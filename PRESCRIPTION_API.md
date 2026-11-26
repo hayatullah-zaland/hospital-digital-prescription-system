@@ -1,5 +1,13 @@
 # Doctor prescriptions
 
+The catalog-backed draft workflow is documented in
+[docs/PRESCRIPTION_DRAFT_API.md](docs/PRESCRIPTION_DRAFT_API.md).
+Use `POST /api/prescriptions/drafts` for new structured demo drafts and
+`PATCH /api/prescriptions/:id` for revision-protected edits. The free-text
+creation example below remains the legacy API; it does not create a draft,
+perform clinical safety checks or sign a prescription. Existing records are
+not automatically migrated or catalog-mapped.
+
 Doctors can create prescriptions for registered patient records. The server
 links each prescription to the patient and the signed-in doctor. Doctors can
 read their own prescriptions; administrators can read all prescriptions.

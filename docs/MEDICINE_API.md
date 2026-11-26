@@ -186,9 +186,13 @@ node --test controller/medicineController.test.js
 
 پاتې کار: معتبر knowledge provider، clinical coverage/source updates،
 معتبر clinical Allergy Checking او Drug Interaction Checking،
-له structured prescription سره نښلول، signed snapshots، عمومي AuditLog،
+د prescription revision ثابت safety check، signed snapshots، عمومي AuditLog،
 pharmacy approval او inventory. اوسنی فهرست هېڅ دوا «خوندي» نه اعلانوي.
 
 د موجود فهرست د اجزاوو لپاره جلا simulated interaction rules او د روان
 ملاقات preview اوس په [INTERACTION_API.md](INTERACTION_API.md) کې دي؛ دا
 د پورته معتبر clinical checking بدیل نه دی.
+
+له فهرست سره د structured Draft جوړول او سمون اوس په
+[PRESCRIPTION_DRAFT_API.md](PRESCRIPTION_DRAFT_API.md) کې مستند دي. Draft د
+دوا/اجزاوو کاپي او catalogVersion ساتي؛ signing او safety freshness لا پاتې دي.

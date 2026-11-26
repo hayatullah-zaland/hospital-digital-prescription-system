@@ -14,6 +14,9 @@ Patient registration, search, and record viewing are documented in
 Doctor prescription creation and viewing are documented in
 [PRESCRIPTION_API.md](PRESCRIPTION_API.md).
 
+د فهرست له دواوو سره د نسخې Draft جوړول، سمون، revision او Postman ازموینه:
+[docs/PRESCRIPTION_DRAFT_API.md](docs/PRESCRIPTION_DRAFT_API.md).
+
 د ډاکټر profile، کاري وختونو او Postman بشپړ لارښود:
 [docs/DOCTOR_API.md](docs/DOCTOR_API.md).
 
@@ -51,6 +54,8 @@ server.js → routes → middleware → controller → models
 - `controller/authController.js`: signup، signin، logout او خپل حساب.
 - `models/Patient.js` او `controller/patientController.js`: د ناروغ ثبت، لټون، کتنه او سمون.
 - `models/Prescription.js` او `controller/prescriptionController.js`: ساده نسخې جوړول او کتل.
+- `controller/prescriptionDraftController.js` او `middleware/prescriptionDraftValidation.js`:
+  د خپل روان ملاقات catalog Draft، medicine snapshots او revision خوندي سمون.
 - `models/Doctor.js` او `controller/doctorController.js`: د doctor حساب مسلکي profile، availability او فعال حالت.
 - `middleware/doctorValidation.js`: د ډاکټر د معلوماتو validation په `validator` کوي؛
   د کوډ د لوستلو ساده پښتو لارښود په [DOCTOR_API.md](docs/DOCTOR_API.md) کې دی.
@@ -95,7 +100,7 @@ suites بیا نه دي چلول شوي. د هرې برخې اړوند tests چ�
 د ۲۰۲۶-۱۱-۲۴ mapping بدلون لپاره د allergies او catalog دواړو focused suites
 ټولې ۷۸ ازموینې بریالۍ شوې؛ نور suites بیا نه دي چلول شوي.
 دا catalog خیالي دی او د واقعي درملنې لپاره مناسب نه دی. حساسیت له Ingredient
-سره په لاس نښلېږي؛ له prescription lifecycle، معتبر clinical checking یا inventory سره نښلول لا پاتې دي.
+سره په لاس نښلېږي؛ د prescription بشپړ lifecycle، معتبر clinical checking او inventory لا پاتې دي.
 
 اوس د `POST /api/patients/:patientId/allergies/check` preview شته. د همدې ورځې
 وروستی focused run ۹۹ بریالۍ ازموینې لري: ۷۲ allergies/mapping/preview او ۲۷ catalog.
@@ -110,6 +115,12 @@ unknown ده؛ no_demo_interaction یوازې د خیالي مثال څرګند 
 دا معتبر clinical checking نه دی. همدغه دوه focused suites ټولې ۱۲۰ ازموینې
 بریالۍ تېرې کړې: ۹۳ allergy/mapping/previews/interaction او ۲۷ catalog؛
 ۲۱ نوې interaction cases شاملې دي. د نورو modules suites بیا نه دي چلول شوي.
+
+اوس `POST /api/prescriptions/drafts` او `PATCH /api/prescriptions/:id` د
+فعال doctor خپل روان ملاقات لپاره catalog_v1 Draft جوړوي او سموي. snapshots،
+revision conflict او legacy compatibility شته؛ ثابت SafetyCheck او signing
+لا پاتې دي. د دې بدلون Draft/Doctor/catalog focused run ټولې ۱۰۹ ازموینې
+بریالۍ تېرې کړې: ۲۹ نوي Draft، ۵۳ Doctor او ۲۷ catalog؛ نور suites بیا نه دي چلول شوي.
 
 | Method | API | اجازه |
 | --- | --- | --- |

@@ -14,7 +14,7 @@
 | Authentication | Signup، signin، bcrypt، Bearer JWT، AuthSession، خپل logout او role middleware | Refresh token، sessions لېست/مدیریت، فعال/غیرفعال User او audit |
 | Users | رولونه او د اډمین له خوا حساب جوړول | لېست، سمون، د صلاحیت ورکولو بشپړ کنټرول او pharmacy membership |
 | Patients | ثبت، لېست، لټون، کتنه او PATCH؛ لاندې جلا allergy module | تایید شوی login link، CareAssignment او بشپړ history |
-| Prescriptions | ساده جوړول، لېست، patient filter او کتنه | Draft/check/sign، immutable revisions، cancellation او transmission |
+| Prescriptions | legacy جوړول/کتنه او catalog_v1 Draft: د روان ملاقات ثبت، snapshots، خپل PATCH او revision conflict | revision-bound SafetyCheck، signing، immutable signed revisions، correction/cancellation، audit او transmission |
 | Doctor Management | linked profile، لېست/search/pagination، partial update، weekly availability، فعال حالت او appointment slots | د User حساب عمومي امنیت او audit لا جلا پاتې کار دی |
 | Appointments | د ۳۰ دقیقو slots، staff booking، scoped لېست، check-in، doctor start/complete، cancellation/no-show او reschedule history | CareAssignment، patient self-booking، عمومي audit او notifications |
 | Medical Records | د خپل ملاقات draft، scoped لېست، سمون، finalize او linked correction history | د نورو clinicians مجاز history، verified patient link او admin clinical audit |
@@ -93,7 +93,7 @@ flowchart LR
 | `Medicine` / medicines | موجود code، name، strength، form، ingredients، notes، isActive، mode، source، sourceVersion، notice، createdBy/updatedBy او version | ثابت unique code؛ optimistic concurrency؛ له prescription/inventory سره نښلول لا پلان دي |
 | `KnowledgeRule` / knowledgerules | موجود ثابت kind، دوه ingredient IDs، unique pairKey، outcome، mode/source/sourceVersion/notice او createdBy؛ وروسته providerRuleId، severity او evidence | اوس یوازې simulated warning/no_demo_interaction؛ PATCH/DELETE نه لري؛ معتبر provider او rule correction لا پلان دي |
 | `SafetyCheck` / safetychecks | prescription، revision، contentHash، allergyVersion، sourceVersion، findings، coverage، mode | د یوې مشخصې محتوا check؛ بدلون یې زړوي |
-| `Prescription` / prescriptions | patient، doctor، diagnosis، medicines؛ وروسته status، revision، rootPrescription، correctionOf، snapshots، signature | signed clinical content immutable |
+| `Prescription` / prescriptions | موجود patient/doctor، diagnosis/medicines؛ نوی catalog_v1 format، draft status، appointment، revision، updatedBy، catalog او medicine/ingredient snapshots؛ وروسته rootPrescription، correctionOf او signature | PATCH یوازې خپل catalog draft او روان ملاقات؛ legacy نه migrate کېږي؛ signed lifecycle لا پلان دی |
 | `Pharmacy` / pharmacies | name، type، contact، approvalStatus، approvedBy | یوازې approved او active pharmacy نسخه ترلاسه کوي |
 | `PharmacyMembership` / pharmacymemberships | user، pharmacy، approvalStatus، approvedBy، isActive | pharmacist role یوازې عمومي لاسرسی نه ورکوي |
 | `PrescriptionTransmission` / prescriptiontransmissions | prescription، revision، pharmacy، sender، status، idempotencyKey، receivedAt | ټاکلي pharmacy ته د signed revision لېږد |
@@ -116,6 +116,7 @@ erDiagram
     PATIENT ||--o{ APPOINTMENT : books
     USER ||--o{ APPOINTMENT : doctor
     APPOINTMENT o|--o{ MEDICAL_RECORD : visit_notes
+    APPOINTMENT o|--o{ PRESCRIPTION : catalog_drafts
     PATIENT ||--o{ PATIENT_ALLERGY : documents
     PATIENT ||--o{ PRESCRIPTION : receives
     USER ||--o{ PRESCRIPTION : writes
@@ -205,6 +206,25 @@ Receptionist check-in کوي؛ doctor visit پیل/ختموي؛ patient یواز
 تاریخچه په یوه atomic save کې دي. Patient booking او CareAssignment لا پاتې دي.
 
 ### Prescription lifecycle
+
+د ۲۰۲۶-۱۱-۲۶ catalog Draft بنسټ اوس موجود دی. فعال doctor خپل رسېدلی
+in_progress ملاقات ټاکي؛ سرور patient/doctor/appointment اخلي او د فعالو
+simulated دواوو/اجزاوو snapshots ساتي. `POST /prescriptions/drafts` جوړول
+او `PATCH /prescriptions/{id}` د خپل Draft سمون دی؛ پخوانی free-text POST
+هم پاتې دی. نوې نسخې format: catalog_v1، status: draft او revision: 1 لري.
+GET د موجود doctor/admin scope له مخې دواړه بڼې ښيي. پخواني records په خپله
+Draft/signed نه ګرځي او د نوي PATCH اجازه نه لري.
+
+PATCH تازه numeric revision او هماغه روان ملاقات غواړي. د متن جزوي سمون
+نور fields ساتي؛ د medicines لېست لېږل ټول لېست او snapshots له current
+catalog څخه تازه کوي. notes-only سمون پخوانی medicine snapshot ساتي، حتی
+که catalog بدل/غیرفعال شي؛ دا د safety freshness تایید نه دی. بریالی save
+revision زیاتوي، optimisticConcurrency د هممهاله edits conflict بندوي.
+د Draft revision د سمون شمېر دی، د هر پخواني متن جلا کاپي نه ساتي. عمومي
+audit، contentHash، SafetyCheck او signed snapshots لا پاتې دي. د API قرارداد
+او ۲۹ دایمي tests تشریح په `PRESCRIPTION_DRAFT_API.md` کې ده.
+
+لاندې بشپړ lifecycle طرحه ده؛ اوس یوازې د Draft جوړول او سمون موجود دي:
 
 ```mermaid
 stateDiagram-v2
@@ -341,7 +361,9 @@ Base: `/api`. لاندې `{id}` د حقیقي ID ځای دی. Role د پورته
 | GET | `/patients` | hospital_admin، receptionist، doctor |
 | GET | `/patients/{id}` | hospital_admin، receptionist، doctor |
 | PATCH | `/patients/{id}` | hospital_admin، receptionist |
-| POST | `/prescriptions` | doctor |
+| POST | `/prescriptions` | doctor؛ موجود legacy free-text flow |
+| POST | `/prescriptions/drafts` | فعال doctor؛ خپل روان ملاقات او فعال simulated catalog |
+| PATCH | `/prescriptions/{id}` | فعال لیکونکی؛ catalog_v1 Draft، هماغه روان ملاقات او تازه revision |
 | GET | `/prescriptions` | hospital_admin یا doctor؛ doctor خپل ریکارډونه |
 | GET | `/prescriptions/{id}` | hospital_admin یا لیکونکی doctor |
 | POST | `/doctors` | hospital_admin؛ موجود doctor حساب ته profile |
@@ -413,7 +435,6 @@ Base: `/api`. لاندې `{id}` د حقیقي ID ځای دی. Role د پورته
 | GET | `/patients/{id}/allergies` | د موجود endpoint راتلونکی غځول: verified patient او CareAssignment scope |
 | GET | `/medication-knowledge/status` | admin/doctor د mode/version/availability لپاره |
 | POST | `/medication-knowledge/import` | admin؛ ټاکل شوې مجازه source/schema |
-| PATCH | `/prescriptions/{id}` | د خپل unsigned draft سمون |
 | POST | `/prescriptions/{id}/check-safety` | لیکونکی doctor؛ server-side check |
 | POST | `/prescriptions/{id}/sign` | لیکونکی doctor؛ تازه safety evidence |
 | POST | `/prescriptions/{id}/corrections` | مجاز doctor؛ linked draft |
@@ -499,7 +520,7 @@ Export د response له لارې ورکول کېږي؛ نوی filesystem فول�
 | ۳ — یوه برخه جوړه | خپل Medical Records او د روان ملاقات allergies/review/manual ingredient mapping/history شته؛ ګډ medical history او verified patient link پاتې دي | ownership، visit access، snapshots، stale version، legacy unmapped records او concurrent writes ازمویل شوي |
 | ۴ — یوه برخه جوړه | simulated Medicine Catalog او ingredients شته؛ معتبر knowledge source integration پاتې دی | source/version/محدودیت مستند؛ clinical coverage او provider لا نه شته |
 | ۵ — یوه برخه جوړه | simulated Allergy او Drug Interaction previews او ثابت demo rules شته؛ معتبر provider او prescription safety check پاتې دي | warning/محدود clear/unknown، permissions، نیمګړی mapping، uncovered pairs، stale-source او DB failure ازمویل شوي؛ معتبر provider لا نه شته |
-| ۶ | Prescription draft/check/sign، correction او cancellation | signed content immutable؛ stale check نه sign کېږي؛ trace/audit ساتل کېږي |
+| ۶ — یوه برخه جوړه | catalog Draft، snapshots او revision خوندي PATCH شته؛ SafetyCheck/sign، correction او cancellation پاتې دي | Draft scope، legacy compatibility، snapshot refresh او concurrent edit ازمویل شوي؛ signed immutability او audit لا پلان دي |
 | ۷ | Pharmacies، memberships، signed transmission او receipt/verification | approved recipient؛ د بل pharmacy لاسرسی منع؛ cancellation ښکاره |
 | ۸ | Inventory او Pharmacy Processing: batches، partial dispensing او transactions | منفي stock نشته؛ expired batch منع؛ retry stock بیا نه کموي |
 | ۹ | Patient Portal، Hospital Dashboard، notifications، reports، analytics، audit کتنه او settings | API او counters/exports ټول relationship scope مراعاتوي |
@@ -540,9 +561,9 @@ mapping، inventory یا بشپړ AuditLog د بشپړېدو معنا نه لر�
 موجود Postman لارښودونه `PATIENT_API.md`، `PRESCRIPTION_API.md` او
 `docs/DOCTOR_API.md`، `docs/APPOINTMENT_API.md`، `docs/AUTH_API.md` او
 `docs/MEDICAL_RECORD_API.md`، `docs/PATIENT_ALLERGY_API.md`، `docs/MEDICINE_API.md`
-او `docs/ALLERGY_CHECK_API.md` او `docs/INTERACTION_API.md` دي. Auth/session، Doctor، appointment، Medical Records، allergies، interactions او catalog suites په
+او `docs/ALLERGY_CHECK_API.md`، `docs/INTERACTION_API.md` او `docs/PRESCRIPTION_DRAFT_API.md` دي. Auth/session، Doctor، appointment، Medical Records، allergies، interactions، catalog او Draft suites په
 `controller/authController.test.js`، `controller/doctorController.test.js` او
-`controller/appointmentController.test.js`، `controller/medicalRecordController.test.js`، `controller/patientAllergyController.test.js` او `controller/medicineController.test.js` کې ساتل شوې او د `npm test` له لارې
+`controller/appointmentController.test.js`، `controller/medicalRecordController.test.js`، `controller/patientAllergyController.test.js`، `controller/medicineController.test.js` او `controller/prescriptionDraftController.test.js` کې ساتل شوې او د `npm test` له لارې
 چلېږي. هر suite خپل موقتي MongoDB کاروي؛ `mongod` یا `MONGOD_BINARY` ورته پکار دی.
 د patient/prescription پخواني پراخ checks موقتي وو؛ د نورو modules دایمي
 coverage لا پاتې دی. نوي test فایلونه په همدې موجودو code فولډرونو کې راځي.
@@ -562,6 +583,11 @@ focused suite کې ۲۷ tests تېر شول؛ دا د ټولو پخوانیو su
 ۹۳ allergy/mapping/preview/interaction او ۲۷ catalog؛ ټول ۱۲۰ بریالي، صفر
 ناکام. ۲۱ نوي interaction cases دي؛ موجود session/role/visit checks نوی
 endpoint هم پوښي. نورو suites ته بیا اړتیا نه وه او نه دي چلول شوي.
+
+د همدې ورځې د catalog Draft بدلون لپاره Draft/Doctor/catalog focused suites
+وچلېدل: ۲۹ نوي Draft، ۵۳ Doctor او ۲۷ catalog، ټول ۱۰۹ بریالي، صفر ناکام.
+د legacy create/read compatibility، permissions، snapshots او optimistic
+concurrency checks پکې شته؛ د نورو modules suites بیا نه دي چلول شوي.
 
 ازموینې مشخصه جلا test DB او خیالي fixtures کاروي؛ عادي DB نه پاکوي.
 د هر پړاو checks باید دا ولري:

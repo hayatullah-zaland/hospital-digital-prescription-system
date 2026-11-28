@@ -4,7 +4,7 @@
 
 دا برخه خیالي، simulated معلومات کاروي او د اصلي ناروغانو د درملنې لپاره
 معتبره نه ده. severity، طبي evidence یا د درملنې سپارښتنه نه اټکل کوي.
-د معتبر clinical provider انتخاب او له نسخې سره ثابت SafetyCheck لا پاتې دي.
+د معتبر clinical provider انتخاب لا پاتې دی. له نسخې سره simulated SafetyCheck اوس په `PRESCRIPTION_SAFETY_API.md` کې تشریح شوی دی.
 
 ## ۱. جوړښت او اجازې
 
@@ -161,8 +161,9 @@ uncovered_ingredient_pairs او no_distinct_ingredient_pair دي. missingPairCou
 preview DB ته نتیجه نه لیکي، نسخه او allergy نه بدلوي. د څو collections
 لوستل atomic snapshot نه دي؛ له هر سمون وروسته بیا check وکړئ. ثابت rule IDs
 او د دوا versions د دې preview شواهد دي؛ د signing SafetyCheck ځای نه نیسي.
-معتبر provider، clinical evidence، عمومي audit او prescription revision سره
-نښلول لا پاتې دي. د sourceVersion مقدار د demo بڼه ده، clinical freshness نه دی.
+معتبر provider، clinical evidence او عمومي audit لا پاتې دي. له prescription
+revision سره جلا simulated check اوس شته؛ `PRESCRIPTION_SAFETY_API.md` وګورئ.
+د sourceVersion مقدار د demo بڼه ده، clinical freshness نه دی.
 
 ```powershell
 node --test controller/patientAllergyController.test.js controller/medicineController.test.js

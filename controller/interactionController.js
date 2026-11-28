@@ -1,3 +1,4 @@
+import { evaluateInteractions } from './medicationSafety.js';
 import KnowledgeRule, { interactionSource } from '../models/KnowledgeRule.js';
 import Ingredient, { catalogSource } from '../models/Ingredient.js';
 import Medicine from '../models/Medicine.js';
@@ -5,13 +6,6 @@ import Medicine from '../models/Medicine.js';
 function isCurrentDemoSource(record) {
   if (!record) return false;
   return record.mode === catalogSource.mode && record.source === catalogSource.source && record.sourceVersion === catalogSource.sourceVersion;
-}
-
-function isUsablePairRule(rule, ids) {
-  if (!isCurrentDemoSource(rule) || rule.kind !== 'drug_interaction') return false;
-  if (!Array.isArray(rule.ingredients) || rule.ingredients.length !== 2) return false;
-  if (String(rule.ingredients[0]) !== ids[0] || String(rule.ingredients[1]) !== ids[1]) return false;
-  return ['warning', 'no_demo_interaction'].includes(rule.outcome);
 }
 
 export async function createInteractionRule(req, res) {
@@ -59,86 +53,30 @@ export async function checkPatientInteractions(req, res) {
     if (medicines.length !== req.allergyMedicineIds.length) {
       return res.status(404).json({ message: 'One or more active medicines were not found' });
     }
-    const issues = [];
-    const ingredientIds = new Set();
-    const medicineVersions = [];
+    const ids = new Set();
     for (const medicine of medicines) {
-      medicineVersions.push({ medicineId: medicine._id, name: medicine.name, version: medicine.version });
-      if (!isCurrentDemoSource(medicine)) {
-        issues.push({ code: 'unsupported_medicine_source', medicineId: medicine._id });
-        continue;
-      }
-      if (!Array.isArray(medicine.ingredients) || medicine.ingredients.length === 0) {
-        issues.push({ code: 'missing_medicine_ingredients', medicineId: medicine._id });
-        continue;
-      }
-      for (const id of medicine.ingredients) ingredientIds.add(id.toString());
+      if (!isCurrentDemoSource(medicine) || !Array.isArray(medicine.ingredients)) continue;
+      for (const id of medicine.ingredients) ids.add(id.toString());
     }
-    // تر ۴۰ بېلابېلو اجزاوو محدودیت تر ۷۸۰ زیاتې جوړې نه پرېږدي.
-    if (ingredientIds.size > 40) return res.status(400).json({ message: 'Check at most 40 distinct ingredients at a time' });
-    const ids = Array.from(ingredientIds).sort();
-    const ingredients = await Ingredient.find({ _id: { $in: ids } }).lean();
-    const ingredientsById = new Map();
-    for (const ingredient of ingredients) ingredientsById.set(ingredient._id.toString(), ingredient);
-    for (const id of ids) {
-      if (!isCurrentDemoSource(ingredientsById.get(id))) issues.push({ code: 'unavailable_ingredient', ingredientId: id });
-    }
-
-    // د بېلابېلو دواوو او د یوې مرکبې دوا د اجزاوو ټولې جوړې ګورو.
-    const pairs = [];
+    if (ids.size > 40) return res.status(400).json({ message: 'Check at most 40 distinct ingredients at a time' });
+    const sorted = Array.from(ids).sort();
     const pairKeys = [];
-    for (let first = 0; first < ids.length; first++) {
-      for (let second = first + 1; second < ids.length; second++) {
-        const key = ids[first] + ':' + ids[second];
-        pairs.push({ key, ids: [ids[first], ids[second]] });
-        pairKeys.push(key);
-      }
+    for (let first = 0; first < sorted.length; first++) {
+      for (let second = first + 1; second < sorted.length; second++) pairKeys.push(sorted[first] + ':' + sorted[second]);
     }
+    const ingredients = await Ingredient.find({ _id: { $in: sorted } }).lean();
     const rules = await KnowledgeRule.find({ pairKey: { $in: pairKeys } }).lean();
-    const rulesByPair = new Map();
-    for (const rule of rules) rulesByPair.set(rule.pairKey, rule);
-    const findings = [];
-    const rulesUsed = [];
-    let missingPairCount = 0;
-    for (const pair of pairs) {
-      const rule = rulesByPair.get(pair.key);
-      const first = ingredientsById.get(pair.ids[0]);
-      const second = ingredientsById.get(pair.ids[1]);
-      if (!isCurrentDemoSource(first) || !isCurrentDemoSource(second)) {
-        missingPairCount++;
-        continue;
-      }
-      if (!isUsablePairRule(rule, pair.ids)) {
-        missingPairCount++;
-        continue;
-      }
-      rulesUsed.push({ ruleId: rule._id, ingredientIds: pair.ids, outcome: rule.outcome });
-      if (rule.outcome !== 'warning') continue;
-      const medicineIds = [];
-      for (const medicine of medicines) {
-        if (!isCurrentDemoSource(medicine) || !Array.isArray(medicine.ingredients)) continue;
-        for (const id of medicine.ingredients) {
-          if (pair.ids.includes(id.toString())) {
-            medicineIds.push(medicine._id);
-            break;
-          }
-        }
-      }
-      findings.push({ ruleId: rule._id, ingredientIds: pair.ids, ingredientNames: [first.name, second.name], medicineIds, message: 'Simulated interaction warning; unsuitable for actual patient care' });
-    }
-    if (missingPairCount > 0) issues.push({ code: 'uncovered_ingredient_pairs', count: missingPairCount });
-    if (pairs.length === 0) issues.push({ code: 'no_distinct_ingredient_pair' });
-    let status = 'clear';
-    if (issues.length > 0) status = 'unknown';
-    if (findings.length > 0) status = 'warning';
-    // preview نسخه نه بدلوي؛ نسخه به وروسته له خپل ثابت check سره ونښلوو.
+    const result = evaluateInteractions(medicines, ingredients, rules);
+    const { status, findings, rulesUsed, coverage } = result;
+    const medicineVersions = result.medicines;
+    // preview نسخه نه بدلوي؛ د Draft ساتل شوې کتنه جلا API لري.
     res.json({
       check: {
         type: 'interaction_preview', mode: interactionSource.mode, status,
         patientId: req.params.patientId, appointmentId: req.allergyAppointment,
         checkedBy: req.user._id, checkedAt: new Date(), medicines: medicineVersions,
         findings, rulesUsed,
-        coverage: { complete: issues.length === 0, ingredientCount: ids.length, pairCount: pairs.length, coveredPairCount: rulesUsed.length, missingPairCount, issues },
+        coverage,
       },
       knowledge: interactionSource,
     });

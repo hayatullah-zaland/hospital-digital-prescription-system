@@ -106,7 +106,7 @@ suites بیا نه دي چلول شوي. د هرې برخې اړوند tests چ�
 وروستی focused run ۹۹ بریالۍ ازموینې لري: ۷۲ allergies/mapping/preview او ۲۷ catalog.
 `clear` یوازې په محدودې simulated ID پرتله کې match نه موندل دي؛ د دوا د
 واقعي خوندي والي یا د نسخې د sign کولو اجازه نه ده. معتبر provider او له
-prescription revision سره ثابت check لا پاتې دي.
+prescription revision سره simulated ساتل شوې کتنه اوس شته؛ معتبر provider لا پاتې دی.
 
 د ۲۰۲۶-۱۱-۲۶ simulated Drug Interaction برخه هم شته: `/api/interaction-rules`
 د ثابتو خیالي قواعدو ثبت/کتنه کوي؛ `/api/patients/:patientId/interactions/check`
@@ -118,7 +118,7 @@ unknown ده؛ no_demo_interaction یوازې د خیالي مثال څرګند 
 
 اوس `POST /api/prescriptions/drafts` او `PATCH /api/prescriptions/:id` د
 فعال doctor خپل روان ملاقات لپاره catalog_v1 Draft جوړوي او سموي. snapshots،
-revision conflict او legacy compatibility شته؛ ثابت SafetyCheck او signing
+revision conflict، legacy compatibility او simulated SafetyCheck شته؛ signing
 لا پاتې دي. د دې بدلون Draft/Doctor/catalog focused run ټولې ۱۰۹ ازموینې
 بریالۍ تېرې کړې: ۲۹ نوي Draft، ۵۳ Doctor او ۲۷ catalog؛ نور suites بیا نه دي چلول شوي.
 
@@ -156,3 +156,5 @@ signin وکړئ. د پخوانیو کاروونکو یا نورو DB معلوم�
 مدیر د /api/auth/users له لارې name، email، password او role لېږي. رولونه hospital_admin، receptionist، doctor، hospital_pharmacist، external_pharmacist او patient دي. عام ثبت role مني؛ که role ونه لېږل شي، patient ټاکل کېږي.
 
 JWT_SECRET شخصي وساتئ. موجودې protected غوښتنې token په Authorization header کې غواړي. د راتلونکي browser د CORS، cookies او session تګلاره په Backend پلان کې ده. د authentication کوډ لپاره لومړی `routes/authRoutes.js`، بیا `middleware/authMiddleware.js` او `controller/authController.js` ولولئ.
+
+د ۲۰۲۶-۱۱-۲۸ برخه: `POST /api/prescriptions/:id/check-safety` پایلې له revision، contentHash او inputHash سره ساتي. د `/safety-checks/latest` او `/safety-checks/:checkId` له لارې خپل doctor پایله او freshness لولي. زړې/نیمګړې پایلې د sign اجازه نه ورکوي. [د Postman بشپړ لارښود](docs/PRESCRIPTION_SAFETY_API.md). درې focused suites: ۱۶۷ بریالۍ، صفر ناکامې؛ ۱۸ نوې SafetyCheck cases.

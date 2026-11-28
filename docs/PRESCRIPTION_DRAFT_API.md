@@ -4,7 +4,7 @@
 
 په دې برخه کې ډاکټر د خپل روان ملاقات لپاره unsigned Draft جوړوي او سموي.
 دواوې له موجود simulated catalog څخه ټاکل کېږي. ټول معلومات تعلیمي او خیالي
-دي؛ د اصلي ناروغانو د درملنې لپاره معتبر نه دي. د نسخې SafetyCheck، لاسلیک،
+دي؛ د اصلي ناروغانو د درملنې لپاره معتبر نه دي. د نسخې simulated SafetyCheck اوس شته؛ لاسلیک،
 اصلاح شوې signed revision، لغوه کول او pharmacy ته لېږل لا پاتې دي.
 
 ## ۱. فایلونه او د معلوماتو تګ
@@ -129,8 +129,8 @@ medicines لېږل ټول لېست بدلوي؛ هره line بیا بشپړه غ
 medicine list بیا لېږل د څرګند refresh په معنا دي او revision زیاتوي.
 یوازې د notes/diagnosis بدلون پخواني medicine snapshots ساتي؛ که catalog
 وروسته بدل یا دوا غیرفعاله شي، notes-only سمون snapshot نه تازه کوي.
-دا د دوا د اوسني خوندي والي تایید نه دی. راتلونکی SafetyCheck به freshness
-او د هماغې نسخې محتوا بیا ارزوي.
+دا د دوا د اوسني خوندي والي تایید نه دی. اوسنی simulated SafetyCheck freshness
+او د هماغې نسخې محتوا بیا ارزوي؛ لارښود په `PRESCRIPTION_SAFETY_API.md` کې دی.
 
 د متن بې‌بدلونه PATCH `400` دی. زوړ revision یا هممهاله conflicting save
 `409` دی؛ تازه GET واخلئ او د تازه revision له مخې بیا سمون وکړئ. revision
@@ -177,5 +177,6 @@ legacy compatibility، read scopes، stale/concurrent edits او failure rollbac
 عادي DB نه لولي. mongod په PATH یا MONGOD_BINARY کې پکار دی. نور suites
 په دې بدلون کې بیا نه دي چلول شوي.
 
-وروسته به د همدې Draft مشخص revision لپاره allergy/interaction SafetyCheck
-جوړوو؛ ورپسې signing، traceable correction/cancellation او transmission دي.
+د همدې Draft مشخص revision لپاره simulated allergy/interaction SafetyCheck
+اوس جوړ شوی؛ [د کتنې لارښود](PRESCRIPTION_SAFETY_API.md) وګورئ. ورپسې signing،
+traceable correction/cancellation او transmission پاتې دي.

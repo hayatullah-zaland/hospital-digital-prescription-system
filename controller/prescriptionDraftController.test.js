@@ -18,6 +18,10 @@ import Appointment from '../models/Appointment.js';
 import Ingredient, { catalogSource } from '../models/Ingredient.js';
 import Medicine from '../models/Medicine.js';
 import Prescription from '../models/Prescription.js';
+import SafetyCheck from '../models/SafetyCheck.js';
+import PatientAllergy from '../models/PatientAllergy.js';
+import KnowledgeRule from '../models/KnowledgeRule.js';
+import { hashSafetyValue, prescriptionSafetyContent } from './prescriptionSafetyData.js';
 import authRoutes from '../routes/authRoutes.js';
 import prescriptionRoutes from '../routes/prescriptionRoutes.js';
 import { handleJsonErrors } from '../middleware/jsonErrorHandler.js';
@@ -71,7 +75,7 @@ before(async () => {
   mongoProcess = spawn(process.env.MONGOD_BINARY || 'mongod', ['--dbpath', databaseDirectory, '--bind_ip', '127.0.0.1', '--port', String(mongoPort), '--quiet', '--logpath', path.join(databaseDirectory, 'mongod.log')], { windowsHide: true, stdio: 'ignore' });
   await once(mongoProcess, 'spawn');
   await mongoose.connect(`mongodb://127.0.0.1:${mongoPort}/prescription_draft_tests`, { serverSelectionTimeoutMS: 15000 });
-  await Promise.all([User.init(), AuthSession.init(), Patient.init(), Doctor.init(), Appointment.init(), Ingredient.init(), Medicine.init(), Prescription.init()]);
+  await Promise.all([User.init(), AuthSession.init(), Patient.init(), Doctor.init(), Appointment.init(), Ingredient.init(), Medicine.init(), Prescription.init(), SafetyCheck.init(), PatientAllergy.init(), KnowledgeRule.init()]);
   const app = express();
   app.use(express.json());
   app.use(handleJsonErrors);
@@ -91,6 +95,9 @@ before(async () => {
 }, { timeout: 30000 });
 
 beforeEach(async () => {
+  await SafetyCheck.deleteMany({});
+  await PatientAllergy.deleteMany({});
+  await KnowledgeRule.deleteMany({});
   await Prescription.deleteMany({});
   await Medicine.deleteMany({});
   await Ingredient.deleteMany({});
@@ -424,4 +431,292 @@ test('malformed JSON is rejected without reflecting the submitted clinical text'
   assert.equal(response.status, 400);
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.equal(JSON.stringify(await response.json()).includes('private clinical text'), false);
+});
+
+function safetyRoute(draft) { return '/api/prescriptions/' + draft._id; }
+
+async function checkDraft(draft, revision = draft.revision, expected = 201) {
+  return request('POST', safetyRoute(draft) + '/check-safety', 'doctor', { revision }, expected);
+}
+
+async function addDemoAllergy(ingredient = ingredients[0], patient = patients[0]) {
+  return PatientAllergy.create({
+    patient: patient._id, substance: 'Fictional report ' + ingredient.code, substanceKey: ingredient.code,
+    ingredient: ingredient._id, ingredientSnapshot: { code: ingredient.code, name: ingredient.name, ...catalogSource },
+    kind: 'allergy', reaction: 'Fictional reaction', source: 'patient_reported', verificationStatus: 'unconfirmed',
+    recordedBy: users.doctor._id, updatedBy: users.doctor._id,
+  });
+}
+
+async function addDemoRule(outcome = 'no_demo_interaction') {
+  const ids = [ingredients[0].id, ingredients[1].id].sort();
+  return KnowledgeRule.create({ ingredients: ids, pairKey: ids.join(':'), outcome, createdBy: users.hospital_admin._id });
+}
+
+async function createTwoMedicineDraft() {
+  return (await request('POST', '/api/prescriptions/drafts', 'doctor', { ...details(), medicines: [line(0), line(1)] }, 201)).prescription;
+}
+
+test('safety checks persist server evidence, hashes and simulated labels without changing the draft', async () => {
+  const draft = await createDraft();
+  const before = await Prescription.findById(draft._id).lean();
+  await addDemoAllergy();
+  const result = await checkDraft(draft);
+  const check = result.safetyCheck;
+  assert.equal(check.status, 'warning');
+  assert.equal(check.mode, 'simulated');
+  assert.equal(check.source, catalogSource.source);
+  assert.match(check.notice, /unsuitable for actual patient care/);
+  assert.equal(check.revision, 1);
+  assert.equal(check.checkedBy, users.doctor.id);
+  assert.equal(check.appointment, visits.own.id);
+  assert.equal(check.contentHash, hashSafetyValue(prescriptionSafetyContent(before)));
+  assert.equal(check.inputHash, hashSafetyValue(check.inputSnapshot));
+  assert.equal(check.allergy.findings.length, 1);
+  assert.equal(check.inputSnapshot.allergies[0].version, 0);
+  assert.equal(result.freshness.state, 'incomplete');
+  assert.equal(result.usableForSigning, false);
+  assert.equal(await SafetyCheck.countDocuments(), 1);
+  assert.deepEqual(await Prescription.findById(draft._id).lean(), before);
+  const reordered = { medicines: before.medicines, notes: before.notes, ...before };
+  assert.equal(hashSafetyValue(prescriptionSafetyContent(reordered)), check.contentHash);
+});
+
+test('a limited simulated clear requires complete allergy mapping and explicit pair coverage', async () => {
+  const unrelated = await Ingredient.create({ code: 'DEMO-UNRELATED', name: 'Fictional unrelated component', createdBy: users.hospital_admin._id });
+  await addDemoAllergy(unrelated);
+  await addDemoRule();
+  const draft = await createTwoMedicineDraft();
+  const result = await checkDraft(draft);
+  assert.equal(result.safetyCheck.status, 'clear');
+  assert.equal(result.safetyCheck.coverageComplete, true);
+  assert.equal(result.freshness.state, 'current');
+  assert.equal(result.usableForSigning, false);
+  const read = await request('GET', safetyRoute(draft) + '/safety-checks/latest', 'doctor', undefined, 200);
+  assert.equal(read.freshness.state, 'current');
+  assert.deepEqual(read.safetyCheck, result.safetyCheck);
+});
+
+test('missing allergy reports and uncovered interaction pairs stay unknown', async () => {
+  const result = await checkDraft(await createTwoMedicineDraft());
+  assert.equal(result.safetyCheck.status, 'unknown');
+  assert.equal(result.safetyCheck.coverageComplete, false);
+  assert.equal(result.safetyCheck.interaction.coverage.missingPairCount, 1);
+  assert.equal(result.freshness.state, 'incomplete');
+});
+
+test('interaction warnings remain visible when allergy coverage is incomplete', async () => {
+  await addDemoRule('warning');
+  const result = await checkDraft(await createTwoMedicineDraft());
+  assert.equal(result.safetyCheck.status, 'warning');
+  assert.equal(result.safetyCheck.allergy.status, 'unknown');
+  assert.equal(result.safetyCheck.interaction.findings.length, 1);
+  assert.equal(result.safetyCheck.coverageComplete, false);
+});
+
+test('safety routes enforce sessions, roles, ownership and active doctor profiles', async () => {
+  const draft = await createDraft();
+  const routes = [['POST', '/check-safety', { revision: 1 }], ['GET', '/safety-checks/latest'], ['GET', '/safety-checks/' + new mongoose.Types.ObjectId()]];
+  const login = await request('POST', '/api/auth/signin', null, { email: users.doctor.email, password }, 200);
+  await request('POST', '/api/auth/logout', login.token, undefined, 200);
+  const expired = jwt.sign({ id: users.doctor.id, sid: jwt.decode(tokens.doctor).sid }, process.env.JWT_SECRET, { expiresIn: -1 });
+  for (const [method, suffix, body] of routes) {
+    for (const account of [null, 'invalid-token', login.token, expired]) await request(method, safetyRoute(draft) + suffix, account, body, 401);
+    for (const account of ['hospital_admin', 'receptionist', 'hospital_pharmacist', 'external_pharmacist', 'patient', 'profilelessDoctor']) await request(method, safetyRoute(draft) + suffix, account, body, 403);
+    await request(method, safetyRoute(draft) + suffix, 'otherDoctor', body, 404);
+  }
+  await Doctor.updateOne({ user: users.doctor._id }, { $set: { isActive: false } });
+  for (const [method, suffix, body] of routes) await request(method, safetyRoute(draft) + suffix, 'doctor', body, 403);
+});
+
+test('all safety routes require the original reached in-progress visit', async () => {
+  const draft = await createDraft();
+  await checkDraft(draft);
+  for (const change of [{ status: 'completed' }, { status: 'scheduled' }, { status: 'in_progress', startAt: new Date(Date.now() + 3600000) }, { startAt: new Date(Date.now() - 3600000), doctor: users.otherDoctor._id }]) {
+    await Appointment.updateOne({ _id: visits.own._id }, { $set: change });
+    await checkDraft(draft, 1, 403);
+    await request('GET', safetyRoute(draft) + '/safety-checks/latest', 'doctor', undefined, 403);
+  }
+});
+
+test('safety validation rejects forged evidence, invalid revisions, ids and query parameters', async () => {
+  const draft = await createDraft();
+  for (const body of [{}, { revision: '1' }, { revision: 0 }, { revision: 1.1 }, { revision: 1, status: 'clear' }, { revision: 1, medicines: [] }, []]) {
+    await request('POST', safetyRoute(draft) + '/check-safety', 'doctor', body, 400);
+  }
+  await request('POST', '/api/prescriptions/invalid/check-safety', 'doctor', { revision: 1 }, 400);
+  await request('GET', safetyRoute(draft) + '/safety-checks/invalid', 'doctor', undefined, 400);
+  await request('GET', safetyRoute(draft) + '/safety-checks/latest?status=clear', 'doctor', undefined, 400);
+  await checkDraft(draft, 2, 409);
+  assert.equal(await SafetyCheck.countDocuments(), 0);
+});
+
+test('catalog changes require explicit medicine snapshot refresh before another check', async () => {
+  const draft = await createDraft();
+  const first = await checkDraft(draft);
+  await Medicine.updateOne({ _id: medicines[0]._id }, { $set: { strength: '20 demo units' }, $inc: { version: 1 } });
+  await checkDraft(draft, 1, 409);
+  const stale = await request('GET', safetyRoute(draft) + '/safety-checks/latest', 'doctor', undefined, 200);
+  assert.equal(stale.freshness.state, 'stale');
+  assert.ok(stale.freshness.reasons.includes('catalog_snapshots_outdated'));
+  const { prescription } = await request('PATCH', safetyRoute(draft), 'doctor', { revision: 1, medicines: [line()] }, 200);
+  const second = await checkDraft(prescription);
+  assert.equal(second.safetyCheck.revision, 2);
+  const old = await request('GET', safetyRoute(draft) + '/safety-checks/' + first.safetyCheck._id, 'doctor', undefined, 200);
+  assert.equal(old.freshness.state, 'stale');
+  assert.equal(old.safetyCheck.contentHash, first.safetyCheck.contentHash);
+  assert.equal(await SafetyCheck.countDocuments(), 2);
+});
+
+test('inactive or missing medicine and changed ingredient source reject safety creation', async () => {
+  const draft = await createDraft();
+  await Medicine.updateOne({ _id: medicines[0]._id }, { $set: { isActive: false } });
+  await checkDraft(draft, 1, 409);
+  await Medicine.updateOne({ _id: medicines[0]._id }, { $set: { isActive: true } });
+  await Ingredient.collection.updateOne({ _id: ingredients[0]._id }, { $set: { sourceVersion: 'unsupported' } });
+  await checkDraft(draft, 1, 409);
+  await Medicine.deleteOne({ _id: medicines[0]._id });
+  await checkDraft(draft, 1, 409);
+  assert.equal(await SafetyCheck.countDocuments(), 0);
+});
+
+test('text edits invalidate old checks and latest returns the most recent stored attempt', async () => {
+  const draft = await createDraft();
+  const first = await checkDraft(draft);
+  const { prescription } = await request('PATCH', safetyRoute(draft), 'doctor', { revision: 1, notes: 'Changed fictional notes' }, 200);
+  const stale = await request('GET', safetyRoute(draft) + '/safety-checks/latest', 'doctor', undefined, 200);
+  assert.equal(stale.freshness.state, 'stale');
+  assert.ok(stale.freshness.reasons.includes('revision_changed'));
+  assert.ok(stale.freshness.reasons.includes('prescription_content_changed'));
+  const second = await checkDraft(prescription);
+  const latest = await request('GET', safetyRoute(draft) + '/safety-checks/latest', 'doctor', undefined, 200);
+  assert.equal(latest.safetyCheck._id, second.safetyCheck._id);
+  const old = await SafetyCheck.findById(first.safetyCheck._id).lean();
+  assert.equal(old.revision, 1);
+});
+
+test('allergy addition, review and refutation invalidate stored input evidence', async () => {
+  const draft = await createDraft();
+  const first = await checkDraft(draft);
+  const allergy = await addDemoAllergy();
+  let read = await request('GET', safetyRoute(draft) + '/safety-checks/latest', 'doctor', undefined, 200);
+  assert.ok(read.freshness.reasons.includes('safety_inputs_changed'));
+  const second = await checkDraft(draft);
+  await PatientAllergy.updateOne({ _id: allergy._id }, { $set: { verificationStatus: 'confirmed' }, $inc: { version: 1 } });
+  read = await request('GET', safetyRoute(draft) + '/safety-checks/latest', 'doctor', undefined, 200);
+  assert.equal(read.freshness.state, 'stale');
+  await checkDraft(draft);
+  await PatientAllergy.updateOne({ _id: allergy._id }, { $set: { verificationStatus: 'refuted' }, $inc: { version: 1 } });
+  read = await request('GET', safetyRoute(draft) + '/safety-checks/latest', 'doctor', undefined, 200);
+  assert.equal(read.freshness.state, 'stale');
+  assert.equal((await SafetyCheck.findById(second.safetyCheck._id)).allergy.findings.length, 1);
+  assert.equal((await SafetyCheck.findById(first.safetyCheck._id)).allergy.findings.length, 0);
+});
+
+test('new pair rules invalidate old checks while unrelated patient reports do not', async () => {
+  const draft = await createTwoMedicineDraft();
+  await checkDraft(draft);
+  await addDemoAllergy(ingredients[0], patients[1]);
+  let read = await request('GET', safetyRoute(draft) + '/safety-checks/latest', 'doctor', undefined, 200);
+  assert.equal(read.freshness.state, 'incomplete');
+  await addDemoRule('warning');
+  read = await request('GET', safetyRoute(draft) + '/safety-checks/latest', 'doctor', undefined, 200);
+  assert.equal(read.freshness.state, 'stale');
+});
+
+test('check details are scoped to their draft, missing results return 404 and reads do not write', async () => {
+  const draft = await createDraft();
+  await request('GET', safetyRoute(draft) + '/safety-checks/latest', 'doctor', undefined, 404);
+  const result = await checkDraft(draft);
+  const otherDraft = await createDraft();
+  await request('GET', safetyRoute(otherDraft) + '/safety-checks/' + result.safetyCheck._id, 'doctor', undefined, 404);
+  await request('GET', safetyRoute(draft) + '/safety-checks/' + new mongoose.Types.ObjectId(), 'doctor', undefined, 404);
+  const before = await SafetyCheck.findById(result.safetyCheck._id).lean();
+  await request('GET', safetyRoute(draft) + '/safety-checks/latest', 'doctor', undefined, 200);
+  assert.deepEqual(await SafetyCheck.findById(result.safetyCheck._id).lean(), before);
+  const response = await fetch(baseUrl + safetyRoute(draft) + '/safety-checks/' + result.safetyCheck._id, { method: 'DELETE', headers: { Authorization: 'Bearer ' + tokens.doctor } });
+  assert.equal(response.status, 404);
+  assert.equal(await SafetyCheck.countDocuments(), 1);
+});
+
+test('legacy and non-draft prescriptions cannot receive stored safety checks', async () => {
+  const draft = await createDraft();
+  await Prescription.collection.updateOne({ _id: new mongoose.Types.ObjectId(draft._id) }, { $unset: { format: '', status: '' } });
+  await checkDraft(draft, 1, 409);
+  await Prescription.collection.updateOne({ _id: new mongoose.Types.ObjectId(draft._id) }, { $set: { format: 'catalog_v1', status: 'signed' } });
+  await checkDraft(draft, 1, 409);
+});
+
+test('more than 200 active reports never produce a complete or signable check', async () => {
+  const template = (await addDemoAllergy()).toObject();
+  const reports = [];
+  for (let index = 0; index < 201; index++) {
+    reports.push({ ...template, _id: new mongoose.Types.ObjectId(), substanceKey: 'DEMO-LIMIT-' + index });
+  }
+  await PatientAllergy.insertMany(reports);
+  const draft = await createDraft();
+  const result = await checkDraft(draft);
+  assert.equal(result.safetyCheck.inputSnapshot.totalAllergies, 202);
+  assert.equal(result.safetyCheck.inputSnapshot.allergies.length, 201);
+  assert.equal(result.safetyCheck.allergy.coverage.allergyReportsChecked, 200);
+  assert.equal(result.safetyCheck.coverageComplete, false);
+  assert.equal(result.freshness.state, 'incomplete');
+  assert.equal(result.usableForSigning, false);
+  const read = await request('GET', safetyRoute(draft) + '/safety-checks/latest', 'doctor', undefined, 200);
+  assert.equal(read.freshness.state, 'incomplete');
+});
+
+test('a draft change during safety evaluation rejects saving the old result', async context => {
+  const draft = await createDraft();
+  const original = Medicine.find.bind(Medicine);
+  let changed = false;
+  context.mock.method(Medicine, 'find', (...args) => {
+    const query = original(...args);
+    const lean = query.lean.bind(query);
+    query.lean = async (...options) => {
+      const result = await lean(...options);
+      if (!changed) {
+        changed = true;
+        await Prescription.updateOne({ _id: draft._id }, { $set: { notes: 'Concurrent demo edit' }, $inc: { revision: 1 } });
+      }
+      return result;
+    };
+    return query;
+  });
+  await checkDraft(draft, 1, 409);
+  assert.equal(await SafetyCheck.countDocuments(), 0);
+});
+
+test('input changes during safety evaluation also reject saving', async context => {
+  const draft = await createDraft();
+  const allergy = await addDemoAllergy();
+  const original = KnowledgeRule.find.bind(KnowledgeRule);
+  let changed = false;
+  context.mock.method(KnowledgeRule, 'find', (...args) => {
+    const query = original(...args);
+    const lean = query.lean.bind(query);
+    query.lean = async (...options) => {
+      const result = await lean(...options);
+      if (!changed) {
+        changed = true;
+        await PatientAllergy.updateOne({ _id: allergy._id }, { $set: { reaction: 'Changed demo reaction' }, $inc: { version: 1 } });
+      }
+      return result;
+    };
+    return query;
+  });
+  await checkDraft(draft, 1, 409);
+  assert.equal(await SafetyCheck.countDocuments(), 0);
+});
+
+test('safety database failures fail closed without leaking details or saving results', async context => {
+  const draft = await createDraft();
+  await checkDraft(draft);
+  context.mock.method(Medicine, 'find', () => { throw new Error('private safety database detail'); });
+  const failed = await checkDraft(draft, 1, 500);
+  const read = await request('GET', safetyRoute(draft) + '/safety-checks/latest', 'doctor', undefined, 500);
+  assert.equal(failed.safetyCheck, undefined);
+  assert.equal(read.freshness, undefined);
+  assert.equal(JSON.stringify([failed, read]).includes('private safety database detail'), false);
+  assert.equal(await SafetyCheck.countDocuments(), 1);
 });

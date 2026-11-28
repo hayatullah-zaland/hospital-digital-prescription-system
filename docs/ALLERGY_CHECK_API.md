@@ -30,8 +30,7 @@ patientRoutes → patientAllergyRoutes → موجود role/visit checks
 نوې collection، فولډر، dependency یا د عام auth بدلون نشته.
 
 دا یوازې preview دی. PatientAllergy، Medicine او Prescription نه بدلوي او
-نتیجه د SafetyCheck په توګه نه ساتي. د prescription check/sign تړاو، durable
-audit او د یوې مشخصې revision ثابت check راتلونکي پړاو ته پاتې دي.
+نتیجه د SafetyCheck په توګه نه ساتي. د prescription لپاره جلا simulated ساتل شوی check اوس په `PRESCRIPTION_SAFETY_API.md` کې دی. Signing او durable audit لا پاتې دي.
 
 ## ۲. Body او پایلې
 
